@@ -1,20 +1,23 @@
 # Handy
 
+> [!IMPORTANT]
+> **СНАЧАЛА ПРОЧИТАЙТЕ: [00_START_HERE_RU.md](00_START_HERE_RU.md)**
+>
+> **Рабочая версия:** `main` = V4 + Lazy Settings Window  
+> **Резервная версия:** `backup-v4-before-v5-memory` = базовая V4  
+> **Не использовать:** любые экспериментальные ветки из списка в [ZZZ_TRASH_DO_NOT_USE](ZZZ_TRASH_DO_NOT_USE/README.md).
+>
+> Перед любыми изменениями новому ассистенту/разработчику следует прочитать START HERE и два отчёта Astra.
+
+
 [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.com/invite/WVBeWsNXK4)
 
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
-## Astra handoff: macOS memory/lifecycle experiments
+## Архитектура и история форка
 
-A detailed Russian-language report covering the fork history, memory measurements, regressions, hypotheses, branch/commit map, and the current repeated-restart/WebView-input problem is here:
-
-**[Отчёт для Astra: история оптимизации Handy на macOS и текущая проблема](docs/ASTRA_HANDOFF_REPORT_RU.md)**
-
-**[Архитектурный аудит Astra](docs/ASTRA_ARCHITECTURE_AUDIT_RU.md)**
-
-Use this report as the starting context before making further lifecycle changes.
-
-Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
+- **[Архитектурный аудит Astra](docs/ASTRA_ARCHITECTURE_AUDIT_RU.md)**
+- **[Подробный handoff-отчёт](docs/ASTRA_HANDOFF_REPORT_RU.md)**
 
 ## Why Handy?
 
