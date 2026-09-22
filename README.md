@@ -10,6 +10,8 @@ A detailed Russian-language report covering the fork history, memory measurement
 
 **[Отчёт для Astra: история оптимизации Handy на macOS и текущая проблема](docs/ASTRA_HANDOFF_REPORT_RU.md)**
 
+**[Архитектурный аудит Astra](docs/ASTRA_ARCHITECTURE_AUDIT_RU.md)**
+
 Use this report as the starting context before making further lifecycle changes.
 
 Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
