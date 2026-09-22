@@ -3,6 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      // Paint the saved palette before the application bundle loads.
+      // This prevents WKWebView from flashing its default white background
+      // when a hidden settings window is shown in dark mode.
+      try {
+        const theme = localStorage.getItem("handy.theme");
+        if (theme === "light" || theme === "dark") {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch {}
+    </script>
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        min-height: 100%;
+        background: #fbfbfb;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]),
+        html:not([data-theme="light"]) body,
+        html:not([data-theme="light"]) #root {
+          background: #2c2b29;
+        }
+      }
+
+      html[data-theme="light"],
+      html[data-theme="light"] body,
+      html[data-theme="light"] #root {
+        background: #fbfbfb;
+      }
+
+      html[data-theme="dark"],
+      html[data-theme="dark"] body,
+      html[data-theme="dark"] #root {
+        background: #2c2b29;
+      }
+    </style>
     <title>handy</title>
   </head>
 

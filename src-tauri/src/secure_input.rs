@@ -477,6 +477,9 @@ mod imp {
         let mut wanted: Vec<(String, ShortcutBinding, bool)> = Vec::new();
         if eligible {
             for (id, binding) in &settings.bindings {
+                if binding.current_binding.trim().is_empty() {
+                    continue;
+                }
                 if id == "cancel" && !state.cancel_requested.load(Ordering::SeqCst) {
                     continue;
                 }

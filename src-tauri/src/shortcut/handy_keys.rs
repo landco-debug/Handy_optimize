@@ -444,9 +444,26 @@ pub fn init_shortcuts(app: &AppHandle) -> Result<(), String> {
             .cloned()
             .unwrap_or(default_binding);
 
+        if binding.current_binding.trim().is_empty() {
+            continue;
+        }
+
         if let Err(e) = state.register(&binding) {
             error!(
                 "Failed to register handy-keys shortcut {} during init: {}",
+                id, e
+            );
+        }
+    }
+
+    // Per-model hotkeys only exist in the user's settings (no defaults).
+    for (id, binding) in &user_settings.bindings {
+        if !settings::is_model_switch_binding(id) {
+            continue;
+        }
+        if let Err(e) = state.register(binding) {
+            error!(
+                "Failed to register handy-keys model hotkey {} during init: {}",
                 id, e
             );
         }
@@ -470,10 +487,15 @@ pub fn register_cancel_shortcut(app: &AppHandle) {
     {
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
-            if let Some(cancel_binding) = get_settings(&app_clone).bindings.get("cancel").cloned() {
-                if let Some(state) = app_clone.try_state::<HandyKeysState>() {
+            let settings = get_settings(&app_clone);
+            let cancel_bindings = super::handy_keys_cancel_bindings(&settings);
+            if let Some(state) = app_clone.try_state::<HandyKeysState>() {
+                for cancel_binding in cancel_bindings {
                     if let Err(e) = state.register(&cancel_binding) {
-                        error!("Failed to register cancel shortcut: {}", e);
+                        error!(
+                            "Failed to register cancel shortcut '{}': {}",
+                            cancel_binding.current_binding, e
+                        );
                     }
                 }
             }
@@ -493,8 +515,10 @@ pub fn unregister_cancel_shortcut(app: &AppHandle) {
     {
         let app_clone = app.clone();
         tauri::async_runtime::spawn(async move {
-            if let Some(cancel_binding) = get_settings(&app_clone).bindings.get("cancel").cloned() {
-                if let Some(state) = app_clone.try_state::<HandyKeysState>() {
+            let settings = get_settings(&app_clone);
+            let cancel_bindings = super::handy_keys_cancel_bindings(&settings);
+            if let Some(state) = app_clone.try_state::<HandyKeysState>() {
+                for cancel_binding in cancel_bindings {
                     let _ = state.unregister(&cancel_binding);
                 }
             }

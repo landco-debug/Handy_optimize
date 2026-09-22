@@ -11,6 +11,7 @@ import type {
 } from "@/bindings";
 import { commands } from "@/bindings";
 import { toast } from "sonner";
+import { isModelHotkeyId } from "@/lib/modelHotkeys";
 
 interface SettingsStore {
   settings: Settings | null;
@@ -388,11 +389,18 @@ export const useSettingsStore = create<SettingsStore>()(
         if (!result.data.success) {
           throw new Error(result.data.error || "Failed to update binding");
         }
+
+        // Assigning a per-model hotkey also clears the global transcribe
+        // binding in the backend. Refresh so the global field immediately
+        // shows the real "Not set" state instead of its optimistic old value.
+        if (isModelHotkeyId(id)) {
+          await get().refreshSettings();
+        }
       } catch (error) {
         console.error(`Failed to update binding ${id}:`, error);
 
         // Rollback on error
-        if (originalBinding && get().settings) {
+        if (originalBinding !== undefined && get().settings) {
           set((state) => ({
             settings: state.settings
               ? {
@@ -407,6 +415,15 @@ export const useSettingsStore = create<SettingsStore>()(
                 }
               : null,
           }));
+        }
+        // A model hotkey that failed on first assignment never existed in
+        // the backend: drop the optimistic entry instead of restoring a key.
+        if (originalBinding === undefined && isModelHotkeyId(id) && get().settings) {
+          set((state) => {
+            if (!state.settings) return {};
+            const { [id]: _removed, ...rest } = state.settings.bindings ?? {};
+            return { settings: { ...state.settings, bindings: rest } };
+          });
         }
 
         // Re-throw to let the caller know it failed

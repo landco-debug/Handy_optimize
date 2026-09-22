@@ -31,10 +31,20 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIcon;
 use tauri::{AppHandle, Manager, Theme};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+#[cfg(target_os = "macos")]
+use objc2::{runtime::AnyObject, AnyThread, MainThreadMarker};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{
+    NSForegroundColorAttributeName, NSMutableParagraphStyle, NSParagraphStyleAttributeName,
+    NSTextAlignment, NSTextTab, NSTextTabOptionKey, NSColor,
+};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{NSArray, NSDictionary, NSMutableAttributedString, NSRange, NSString};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrayIconState {
@@ -61,6 +71,8 @@ struct MenuInputs {
     selected_model: String,
     /// `(id, name)` of downloaded models, sorted by name.
     downloaded_models: Vec<(String, String)>,
+    /// `(model_id, binding)` for models that currently have a hotkey.
+    model_hotkeys: Vec<(String, String)>,
     locale: String,
     update_checks_enabled: bool,
 }
@@ -214,6 +226,15 @@ pub fn get_icon_path(theme: AppTheme, state: TrayIconState, warning: bool) -> &'
     }
 }
 
+/// True when Handy is neither recording nor transcribing (the tray shows the
+/// model list only in this state).
+pub fn is_idle(app: &AppHandle) -> bool {
+    match app.try_state::<TrayState>() {
+        Some(state) => !state.lock().icon_state.is_busy(),
+        None => true,
+    }
+}
+
 /// Sets the recording state shown by the tray (icon + Cancel/model menu).
 pub fn set_tray_state(app: &AppHandle, state: TrayIconState) {
     sync_tray_with(app, |inner| inner.icon_state = state);
@@ -324,6 +345,19 @@ fn compute_desired(app: &AppHandle, icon_state: TrayIconState) -> TrayDesired {
         .collect();
     downloaded_models.sort_by(|a, b| a.1.cmp(&b.1));
 
+    let mut model_hotkeys: Vec<(String, String)> = settings
+        .bindings
+        .iter()
+        .filter_map(|(binding_id, binding)| {
+            let model_id = binding_id.strip_prefix(settings::MODEL_SWITCH_BINDING_PREFIX)?;
+            if binding.current_binding.trim().is_empty() {
+                return None;
+            }
+            Some((model_id.to_string(), binding.current_binding.clone()))
+        })
+        .collect();
+    model_hotkeys.sort_by(|a, b| a.0.cmp(&b.0));
+
     TrayDesired {
         icon_path: get_icon_path(theme, icon_state, warning),
         menu: MenuInputs {
@@ -332,10 +366,143 @@ fn compute_desired(app: &AppHandle, icon_state: TrayIconState) -> TrayDesired {
             model_loaded,
             selected_model: settings.selected_model,
             downloaded_models,
+            model_hotkeys,
             locale: settings.app_language,
             update_checks_enabled: settings.update_checks_enabled,
         },
     }
+}
+
+/// Human-readable display for a model hotkey. We intentionally do not put the
+/// hotkey into the native `accelerator` field: on macOS that field is active,
+/// not display-only, and would create a second shortcut path alongside
+/// HandyKeys. A text hint avoids duplicate/racing actions and also supports
+/// modifier-only, Fn, mouse and side-specific modifier bindings.
+fn menu_hotkey_hint(raw: &str) -> String {
+    fn title(part: &str) -> String {
+        let lower = part.to_ascii_lowercase();
+        if lower == "fn" || lower == "function" {
+            return "fn".to_string();
+        }
+        if lower.starts_with('f') && lower[1..].chars().all(|c| c.is_ascii_digit()) {
+            return lower.to_ascii_uppercase();
+        }
+        let mut chars = lower.chars();
+        match chars.next() {
+            Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+            None => String::new(),
+        }
+    }
+
+    raw.split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let lower = part.to_ascii_lowercase();
+            if let Some(base) = lower.strip_suffix("_left") {
+                format!("Left {}", title(base))
+            } else if let Some(base) = lower.strip_suffix("_right") {
+                format!("Right {}", title(base))
+            } else {
+                title(&lower)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+#[cfg(target_os = "macos")]
+fn style_macos_model_hotkeys(
+    tray: &tauri::tray::TrayIcon<tauri::Wry>,
+    inputs: &MenuInputs,
+) -> Result<(), String> {
+    let hints: Vec<(String, String)> = inputs
+        .downloaded_models
+        .iter()
+        .filter_map(|(id, name)| {
+            inputs
+                .model_hotkeys
+                .iter()
+                .find(|(model_id, _)| model_id == id)
+                .map(|(_, binding)| (name.clone(), menu_hotkey_hint(binding)))
+        })
+        .collect();
+
+    if hints.is_empty() {
+        return Ok(());
+    }
+
+    tray.with_inner_tray_icon(move |inner| -> Result<(), String> {
+        let mtm = MainThreadMarker::new()
+            .ok_or_else(|| "native tray styling did not run on the macOS main thread".to_string())?;
+        let status_item = inner
+            .ns_status_item()
+            .ok_or_else(|| "NSStatusItem is unavailable".to_string())?;
+        let menu = status_item
+            .menu(mtm)
+            .ok_or_else(|| "NSStatusItem has no NSMenu".to_string())?;
+
+        // Give the model rows a stable right-hand hint column without using
+        // NSMenuItem.keyEquivalent. A key equivalent would be an active second
+        // shortcut handler; this is display-only formatting.
+        let width = menu.size().width.max(520.0);
+        menu.setMinimumWidth(width);
+        let tab_location = width - 24.0;
+
+        let options = NSDictionary::<NSTextTabOptionKey, AnyObject>::new();
+        let tab = unsafe {
+            NSTextTab::initWithTextAlignment_location_options(
+                NSTextTab::alloc(),
+                NSTextAlignment::Right,
+                tab_location,
+                &options,
+            )
+        };
+        let paragraph = NSMutableParagraphStyle::new();
+        // NSMutableParagraphStyle starts with AppKit's default tab stops.
+        // If we merely add our right-aligned stop, the title's "\t" lands on
+        // the nearest default stop and the hint hugs the model name. Replace
+        // the defaults entirely so this is the only tab stop.
+        let tab_stops = NSArray::from_slice(&[&*tab]);
+        paragraph.setTabStops(Some(&tab_stops));
+        // AppKit has historically ignored tab stops in NSMenuItem attributed
+        // titles when the paragraph has a zero indent on some macOS releases.
+        // A practically invisible indent keeps the native menu layout intact
+        // while making the explicit tab stop reliable.
+        paragraph.setHeadIndent(f64::EPSILON);
+        let hint_color = NSColor::secondaryLabelColor();
+
+        for (name, hint) in hints {
+            let title = NSString::from_str(&name);
+            let Some(item) = menu.itemWithTitle(&title) else {
+                continue;
+            };
+
+            let display = format!("{name}\t{hint}");
+            let display_ns = NSString::from_str(&display);
+            let attributed = NSMutableAttributedString::from_nsstring(&display_ns);
+            let full_len = display.encode_utf16().count();
+            let hint_start = name.encode_utf16().count() + 1;
+            let hint_len = hint.encode_utf16().count();
+
+            unsafe {
+                attributed.addAttribute_value_range(
+                    NSParagraphStyleAttributeName,
+                    &paragraph,
+                    NSRange::new(0, full_len),
+                );
+                attributed.addAttribute_value_range(
+                    NSForegroundColorAttributeName,
+                    &hint_color,
+                    NSRange::new(hint_start, hint_len),
+                );
+            }
+            item.setAttributedTitle(Some(&attributed));
+        }
+
+        Ok(())
+    })
+    .map_err(|err| err.to_string())?
 }
 
 fn post_apply(app: &AppHandle) {
@@ -396,6 +563,10 @@ fn apply_on_main(app: &AppHandle) {
             Ok((menu, tooltip)) => match tray.set_menu(Some(menu)) {
                 Ok(()) => {
                     menu_ok = true;
+                    #[cfg(target_os = "macos")]
+                    if let Err(err) = style_macos_model_hotkeys(tray.inner(), &desired.menu) {
+                        warn!("Failed to style model hotkey hints in tray menu: {err}");
+                    }
                     // Best-effort: logged, not retried. The tooltip is cosmetic
                     // and can only fail on Windows, where a failing
                     // Shell_NotifyIcon call means the icon is failing too.
@@ -530,22 +701,10 @@ fn build_menu(app: &AppHandle, inputs: &MenuInputs) -> tauri::Result<(Menu<tauri
             ],
         )?
     } else {
-        // Build model submenu — label is the active model name
-        let submenu_label = inputs
-            .downloaded_models
-            .iter()
-            .find(|(id, _)| *id == inputs.selected_model)
-            .map(|(_, name)| name.clone())
-            .unwrap_or_else(|| strings.model.clone());
-
-        let model_submenu = Submenu::with_id(app, "model_submenu", &submenu_label, true)?;
-        for (id, name) in &inputs.downloaded_models {
-            let is_active = *id == inputs.selected_model;
-            let item_id = format!("model_select:{}", id);
-            let item = CheckMenuItem::with_id(app, &item_id, name, true, is_active, None::<&str>)?;
-            model_submenu.append(&item)?;
-        }
-
+        // Flat layout: every downloaded model is a top-level check item, so
+        // switching models is a single click on the tray icon instead of
+        // hovering a submenu. The event ids (`model_select:<id>`) are the same
+        // as before, so the menu-event handler in lib.rs is unchanged.
         let unload_model_i = MenuItem::with_id(
             app,
             "unload_model",
@@ -554,22 +713,34 @@ fn build_menu(app: &AppHandle, inputs: &MenuInputs) -> tauri::Result<(Menu<tauri
             None::<&str>,
         )?;
 
-        Menu::with_items(
-            app,
-            &[
-                &version_i,
-                &separator()?,
-                &copy_last_transcript_i,
-                &separator()?,
-                &model_submenu,
-                &unload_model_i,
-                &separator()?,
-                &settings_i,
-                &check_updates_i,
-                &separator()?,
-                &quit_i,
-            ],
-        )?
+        let menu = Menu::new(app)?;
+        menu.append(&version_i)?;
+        menu.append(&separator()?)?;
+        menu.append(&copy_last_transcript_i)?;
+        menu.append(&separator()?)?;
+        if !inputs.downloaded_models.is_empty() {
+            for (id, name) in &inputs.downloaded_models {
+                let is_active = *id == inputs.selected_model;
+                let item_id = format!("model_select:{}", id);
+                let item = CheckMenuItem::with_id(
+                    app,
+                    &item_id,
+                    name,
+                    true,
+                    is_active,
+                    None::<&str>,
+                )?;
+                menu.append(&item)?;
+            }
+            menu.append(&separator()?)?;
+        }
+        menu.append(&unload_model_i)?;
+        menu.append(&separator()?)?;
+        menu.append(&settings_i)?;
+        menu.append(&check_updates_i)?;
+        menu.append(&separator()?)?;
+        menu.append(&quit_i)?;
+        menu
     };
 
     // When update checks are forced off (e.g. HANDY_DISABLE_UPDATER, set by
@@ -668,7 +839,10 @@ pub fn copy_last_transcript(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{last_transcript_text, load_tray_icon, MenuInputs, TrayDesired, TrayIconState};
+    use super::{
+        last_transcript_text, load_tray_icon, menu_hotkey_hint, MenuInputs, TrayDesired,
+        TrayIconState,
+    };
     use crate::managers::history::HistoryEntry;
 
     fn build_entry(transcription: &str, post_processed: Option<&str>) -> HistoryEntry {
@@ -692,9 +866,17 @@ mod tests {
             model_loaded: true,
             selected_model: "small".to_string(),
             downloaded_models: vec![("small".to_string(), "Small".to_string())],
+            model_hotkeys: Vec::new(),
             locale: "en".to_string(),
             update_checks_enabled: true,
         }
+    }
+
+    #[test]
+    fn model_hotkey_hints_are_human_readable() {
+        assert_eq!(menu_hotkey_hint("option+space"), "Option + Space");
+        assert_eq!(menu_hotkey_hint("option_right"), "Right Option");
+        assert_eq!(menu_hotkey_hint("fn+f6"), "fn + F6");
     }
 
     #[test]

@@ -29,6 +29,77 @@ use crate::tray;
 
 // Note: Commands are accessed via shortcut::handy_keys:: in lib.rs
 
+pub(crate) const CANCEL_SHADOW_PREFIX: &str = "cancel_shadow:";
+
+pub(crate) fn is_cancel_binding(id: &str) -> bool {
+    id == "cancel" || id.starts_with(CANCEL_SHADOW_PREFIX)
+}
+
+/// Build just the extra cancel bindings needed for the modifiers of currently
+/// assigned transcription hotkeys. HandyKeys matches modifiers strictly, so a
+/// plain Escape binding does not match Option+Escape while an Option-based
+/// dictation hotkey is still held. Building the shadows from HandyKeys' parsed
+/// modifier flags also preserves side-specific modifiers such as Option Right.
+pub(crate) fn handy_keys_cancel_bindings(
+    settings: &settings::AppSettings,
+) -> Vec<ShortcutBinding> {
+    let Some(base) = settings.bindings.get("cancel").cloned() else {
+        return Vec::new();
+    };
+    let Ok(base_hotkey) = base.current_binding.parse::<::handy_keys::Hotkey>() else {
+        return vec![base];
+    };
+    let Some(cancel_key) = base_hotkey.key else {
+        // There is no keyed cancel action to combine with held modifiers.
+        return vec![base];
+    };
+
+    let mut result = vec![base.clone()];
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(base_hotkey);
+
+    for (binding_id, binding) in &settings.bindings {
+        let is_transcribe = binding_id == "transcribe"
+            || binding_id == "transcribe_with_post_process"
+            || settings::is_model_switch_binding(binding_id);
+        if !is_transcribe
+            || binding.current_binding.trim().is_empty()
+            || (binding_id == "transcribe_with_post_process" && !settings.post_process_enabled)
+        {
+            continue;
+        }
+
+        let Ok(trigger_hotkey) = binding.current_binding.parse::<::handy_keys::Hotkey>() else {
+            continue;
+        };
+        if trigger_hotkey.modifiers.is_empty() {
+            continue;
+        }
+
+        let combined_modifiers = base_hotkey.modifiers | trigger_hotkey.modifiers;
+        let Ok(shadow_hotkey) = ::handy_keys::Hotkey::new(combined_modifiers, cancel_key) else {
+            continue;
+        };
+        if !seen.insert(shadow_hotkey) {
+            continue;
+        }
+
+        let mut shadow = base.clone();
+        shadow.id = format!(
+            "{}{}",
+            CANCEL_SHADOW_PREFIX,
+            combined_modifiers.bits()
+        );
+        shadow.name = "Cancel (held-hotkey shadow)".to_string();
+        shadow.description = "Internal cancel binding for a held dictation hotkey.".to_string();
+        shadow.default_binding.clear();
+        shadow.current_binding = shadow_hotkey.to_handy_string();
+        result.push(shadow);
+    }
+
+    result
+}
+
 /// Initialize shortcuts using the configured implementation
 pub fn init_shortcuts(app: &AppHandle) {
     let user_settings = settings::load_or_create_app_settings(app);
@@ -81,6 +152,11 @@ pub fn unregister_cancel_shortcut(app: &AppHandle) {
 
 /// Register a shortcut using the appropriate implementation
 pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+    // An empty binding is a deliberate "not assigned" state (currently used
+    // by the global transcribe shortcut when per-model hotkeys are configured).
+    if binding.current_binding.trim().is_empty() {
+        return Ok(());
+    }
     let settings = get_settings(app);
     match settings.keyboard_implementation {
         KeyboardImplementation::Tauri => tauri_impl::register_shortcut(app, binding),
@@ -90,6 +166,9 @@ pub fn register_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<()
 
 /// Unregister a shortcut using the appropriate implementation
 pub fn unregister_shortcut(app: &AppHandle, binding: ShortcutBinding) -> Result<(), String> {
+    if binding.current_binding.trim().is_empty() {
+        return Ok(());
+    }
     let settings = get_settings(app);
     match settings.keyboard_implementation {
         KeyboardImplementation::Tauri => tauri_impl::unregister_shortcut(app, binding),
@@ -115,9 +194,10 @@ pub fn change_binding(
     id: String,
     binding: String,
 ) -> Result<BindingResponse, String> {
-    // Reject empty bindings — every shortcut should have a value
-    if binding.trim().is_empty() {
-        return Err("Binding cannot be empty".to_string());
+    // Per-model hotkeys are dynamic bindings with their own lifecycle
+    // (created on first assignment, removed when cleared).
+    if settings::is_model_switch_binding(&id) {
+        return change_model_binding(app, id, binding);
     }
 
     let mut settings = settings::get_settings(&app);
@@ -148,6 +228,54 @@ pub fn change_binding(
             }
         }
     };
+
+    // The global transcribe shortcut may intentionally be unassigned. This is
+    // also what its Reset button means in the fork.
+    if id == "transcribe" && binding.trim().is_empty() {
+        if !binding_to_modify.current_binding.trim().is_empty() {
+            if let Err(e) = unregister_shortcut(&app, binding_to_modify.clone()) {
+                debug!("Could not unregister cleared global transcribe hotkey: {}", e);
+            }
+        }
+        let mut cleared = binding_to_modify;
+        cleared.current_binding.clear();
+        settings.bindings.insert(id, cleared.clone());
+        settings::write_settings(&app, settings);
+        crate::secure_input::reconcile_fallback(&app);
+        tray::update_tray_menu(&app);
+        return Ok(BindingResponse {
+            success: true,
+            binding: Some(cleared),
+            error: None,
+        });
+    }
+
+    // Other built-in shortcuts still require a real value.
+    if binding.trim().is_empty() {
+        return Err("Binding cannot be empty".to_string());
+    }
+
+    // Per-model hotkeys and the global transcribe hotkey are mutually
+    // exclusive. Assigning a model hotkey clears the global one; while any
+    // model hotkey exists, refuse to silently create a second global trigger.
+    if id == "transcribe"
+        && settings
+            .bindings
+            .iter()
+            .any(|(binding_id, b)| {
+                settings::is_model_switch_binding(binding_id)
+                    && !b.current_binding.trim().is_empty()
+            })
+    {
+        return Ok(BindingResponse {
+            success: false,
+            binding: Some(binding_to_modify),
+            error: Some(
+                "Clear the per-model hotkeys before assigning the global transcribe hotkey."
+                    .to_string(),
+            ),
+        });
+    }
 
     // If this is the cancel binding, just update the settings and return
     // It's managed dynamically, so we don't register/unregister here
@@ -201,6 +329,7 @@ pub fn change_binding(
     // Save the settings and synchronize any active Secure Input shadows.
     settings::write_settings(&app, settings);
     crate::secure_input::reconcile_fallback(&app);
+    tray::update_tray_menu(&app);
 
     // Return the updated binding
     Ok(BindingResponse {
@@ -208,6 +337,121 @@ pub fn change_binding(
         binding: Some(updated_binding),
         error: None,
     })
+}
+
+/// Assign, change or clear the hotkey that starts dictation with a model.
+///
+/// Unlike the built-in bindings these have no default: the binding is created
+/// in settings on first assignment, and an empty `binding` removes it.
+fn change_model_binding(
+    app: AppHandle,
+    id: String,
+    binding: String,
+) -> Result<BindingResponse, String> {
+    let mut settings = settings::get_settings(&app);
+    let existing = settings.bindings.get(&id).cloned();
+
+    // An empty value clears the model's hotkey.
+    if binding.trim().is_empty() {
+        if let Some(old) = existing {
+            if let Err(e) = unregister_shortcut(&app, old) {
+                debug!("Could not unregister cleared model hotkey '{}': {}", id, e);
+            }
+            settings.bindings.remove(&id);
+            settings::write_settings(&app, settings);
+            crate::secure_input::reconcile_fallback(&app);
+            tray::update_tray_menu(&app);
+        }
+        return Ok(BindingResponse {
+            success: true,
+            binding: None,
+            error: None,
+        });
+    }
+
+    if let Err(e) = validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)
+    {
+        warn!("change_binding validation error: {}", e);
+        return Err(e);
+    }
+
+    if let Some(old) = &existing {
+        if let Err(e) = unregister_shortcut(&app, old.clone()) {
+            debug!("Could not unregister previous model hotkey '{}': {}", id, e);
+        }
+    }
+
+    // Model hotkeys replace the global transcribe trigger. Temporarily remove
+    // it before registering the model key so assigning the same key can
+    // succeed; restore it if the model registration fails.
+    let global_transcribe = settings
+        .bindings
+        .get("transcribe")
+        .cloned()
+        .filter(|b| !b.current_binding.trim().is_empty());
+    if let Some(global) = &global_transcribe {
+        if let Err(e) = unregister_shortcut(&app, global.clone()) {
+            debug!("Could not unregister global transcribe hotkey: {}", e);
+        }
+    }
+
+    let model_id = id
+        .strip_prefix(settings::MODEL_SWITCH_BINDING_PREFIX)
+        .unwrap_or(&id)
+        .to_string();
+    let mut updated = existing.clone().unwrap_or_else(|| ShortcutBinding {
+        id: id.clone(),
+        name: format!("Dictate with {}", model_id),
+        description: "Starts dictation with this model.".to_string(),
+        default_binding: String::new(),
+        current_binding: String::new(),
+    });
+    updated.current_binding = binding;
+
+    if let Err(e) = register_shortcut(&app, updated.clone()) {
+        let error_msg = format!("Failed to register shortcut: {}", e);
+        error!("change_binding error: {}", error_msg);
+        if let Some(old) = &existing {
+            restore_registration(&app, old);
+        }
+        if let Some(global) = &global_transcribe {
+            restore_registration(&app, global);
+        }
+        return Ok(BindingResponse {
+            success: false,
+            binding: None,
+            error: Some(error_msg),
+        });
+    }
+
+    if let Some(mut global) = global_transcribe {
+        global.current_binding.clear();
+        settings.bindings.insert("transcribe".to_string(), global);
+    }
+    settings.bindings.insert(id, updated.clone());
+    settings::write_settings(&app, settings);
+    crate::secure_input::reconcile_fallback(&app);
+    tray::update_tray_menu(&app);
+
+    Ok(BindingResponse {
+        success: true,
+        binding: Some(updated),
+        error: None,
+    })
+}
+
+/// Drop the hotkey of a model that was deleted, so an invisible binding can't
+/// keep swallowing that key system-wide.
+pub fn remove_model_binding(app: &AppHandle, model_id: &str) {
+    let id = format!("{}{}", settings::MODEL_SWITCH_BINDING_PREFIX, model_id);
+    let mut settings = get_settings(app);
+    if let Some(binding) = settings.bindings.remove(&id) {
+        if let Err(e) = unregister_shortcut(app, binding) {
+            debug!("Could not unregister hotkey of deleted model '{}': {}", id, e);
+        }
+        settings::write_settings(app, settings);
+        crate::secure_input::reconcile_fallback(app);
+    }
 }
 
 /// Best-effort re-register of the previous binding after a failed change,
@@ -224,6 +468,9 @@ fn restore_registration(app: &AppHandle, binding: &ShortcutBinding) {
 #[tauri::command]
 #[specta::specta]
 pub fn reset_binding(app: AppHandle, id: String) -> Result<BindingResponse, String> {
+    if id == "transcribe" {
+        return change_binding(app, id, String::new());
+    }
     let binding = settings::get_stored_binding(&settings::get_settings(&app), &id)?;
     change_binding(app, id, binding.default_binding)
 }
@@ -413,7 +660,7 @@ fn unregister_all_shortcuts(app: &AppHandle, implementation: KeyboardImplementat
 
     for (id, binding) in bindings {
         // Skip cancel shortcut as it's dynamically registered
-        if id == "cancel" {
+        if id == "cancel" || binding.current_binding.trim().is_empty() {
             continue;
         }
 
@@ -457,6 +704,13 @@ fn register_all_shortcuts_for_implementation(
             .cloned()
             .unwrap_or_else(|| default_binding.clone());
 
+        // Empty global transcribe is an intentional "not assigned" state,
+        // not an invalid shortcut that should be reset when implementations
+        // are switched.
+        if id == "transcribe" && binding.current_binding.trim().is_empty() {
+            continue;
+        }
+
         // Validate the shortcut for the target implementation
         if let Err(e) =
             validate_shortcut_for_implementation(&binding.current_binding, implementation)
@@ -483,6 +737,39 @@ fn register_all_shortcuts_for_implementation(
         if let Err(e) = result {
             error!(
                 "Failed to register shortcut '{}' for {:?}: {}",
+                id, implementation, e
+            );
+        }
+    }
+
+    // Per-model hotkeys have no default to fall back to: one that is invalid
+    // for the new implementation is dropped.
+    let model_bindings: Vec<(String, ShortcutBinding)> = current_settings
+        .bindings
+        .iter()
+        .filter(|(id, _)| settings::is_model_switch_binding(id))
+        .map(|(id, binding)| (id.clone(), binding.clone()))
+        .collect();
+    for (id, binding) in model_bindings {
+        if let Err(e) =
+            validate_shortcut_for_implementation(&binding.current_binding, implementation)
+        {
+            info!(
+                "Model hotkey '{}' ({}) is invalid for {:?}: {}. Removing it.",
+                id, binding.current_binding, implementation, e
+            );
+            current_settings.bindings.remove(&id);
+            reset_bindings.push(id);
+            continue;
+        }
+
+        let result = match implementation {
+            KeyboardImplementation::Tauri => tauri_impl::register_shortcut(app, binding),
+            KeyboardImplementation::HandyKeys => handy_keys::register_shortcut(app, binding),
+        };
+        if let Err(e) = result {
+            error!(
+                "Failed to register model hotkey '{}' for {:?}: {}",
                 id, implementation, e
             );
         }
@@ -1406,6 +1693,7 @@ pub async fn get_available_accelerators() -> crate::managers::transcription::Ava
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use handy_keys::Hotkey;
     use tauri_plugin_global_shortcut::Shortcut;
 
@@ -1422,5 +1710,37 @@ mod tests {
             assert!(key.parse::<Shortcut>().is_ok(), "Tauri rejected {key}");
             assert!(key.parse::<Hotkey>().is_ok(), "HandyKeys rejected {key}");
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cancel_shadows_follow_only_assigned_transcribe_modifiers() {
+        let mut settings = settings::get_default_settings();
+        settings
+            .bindings
+            .get_mut("transcribe")
+            .unwrap()
+            .current_binding = "option+space".to_string();
+        let variants = handy_keys_cancel_bindings(&settings);
+
+        assert!(variants
+            .iter()
+            .any(|binding| binding.current_binding == "escape"));
+        assert!(variants
+            .iter()
+            .any(|binding| binding.current_binding == "option+escape"));
+        assert!(!variants
+            .iter()
+            .any(|binding| binding.current_binding == "command+option+escape"));
+
+        settings
+            .bindings
+            .get_mut("transcribe")
+            .unwrap()
+            .current_binding = "option_right".to_string();
+        let side_specific = handy_keys_cancel_bindings(&settings);
+        assert!(side_specific
+            .iter()
+            .any(|binding| binding.current_binding == "option_right+escape"));
     }
 }

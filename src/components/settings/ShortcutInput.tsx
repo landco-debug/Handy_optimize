@@ -8,6 +8,8 @@ interface ShortcutInputProps {
   grouped?: boolean;
   shortcutId: string;
   disabled?: boolean;
+  /** Overrides the row title (used for per-model hotkeys). */
+  label?: string;
 }
 
 /**

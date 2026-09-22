@@ -12,13 +12,15 @@ use crate::managers::audio::AudioRecordingManager;
 use crate::settings::get_settings;
 use crate::transcription_coordinator::is_transcribe_binding;
 use crate::TranscriptionCoordinator;
+use super::is_cancel_binding;
 
 /// Handle a shortcut event from either implementation.
 ///
 /// This function contains the shared logic for:
 /// - Looking up the action in ACTION_MAP
 /// - Handling the cancel binding (only fires when recording)
-/// - Routing transcribe bindings to the coordinator, which applies the
+/// - Routing transcribe bindings (including per-model hotkeys, which start a
+///   dictation with that model) to the coordinator, which applies the
 ///   configured activation mode (toggle / push-to-talk / hold-or-toggle)
 ///
 /// # Arguments
@@ -50,7 +52,13 @@ pub fn handle_shortcut_event(
         return;
     }
 
-    let Some(action) = ACTION_MAP.get(binding_id) else {
+    let action_id = if is_cancel_binding(binding_id) {
+        "cancel"
+    } else {
+        binding_id
+    };
+
+    let Some(action) = ACTION_MAP.get(action_id) else {
         warn!(
             "No action defined in ACTION_MAP for shortcut ID '{}'. Shortcut: '{}', Pressed: {}",
             binding_id, hotkey_string, is_pressed
@@ -59,10 +67,10 @@ pub fn handle_shortcut_event(
     };
 
     // Cancel binding: only fires when recording and key is pressed
-    if binding_id == "cancel" {
+    if is_cancel_binding(binding_id) {
         let audio_manager = app.state::<Arc<AudioRecordingManager>>();
         if audio_manager.is_recording() && is_pressed {
-            action.start(app, binding_id, hotkey_string);
+            action.start(app, "cancel", hotkey_string);
         }
         return;
     }

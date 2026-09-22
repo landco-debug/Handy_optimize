@@ -535,7 +535,20 @@ pub struct TranscriptionCoordinator {
 }
 
 pub fn is_transcribe_binding(id: &str) -> bool {
-    id == "transcribe" || id == "transcribe_with_post_process"
+    id == "transcribe"
+        || id == "transcribe_with_post_process"
+        || crate::settings::is_model_switch_binding(id)
+}
+
+/// Key into `ACTION_MAP`. Per-model hotkeys (`switch_model:<id>`) are dynamic,
+/// so they have no entry of their own: they run the plain transcribe action,
+/// after `start` has made their model the active one.
+fn action_key(binding_id: &str) -> &str {
+    if crate::settings::is_model_switch_binding(binding_id) {
+        "transcribe"
+    } else {
+        binding_id
+    }
 }
 
 impl TranscriptionCoordinator {
@@ -687,7 +700,17 @@ fn run_effect(app: &AppHandle, state: &mut CoordinatorState, effect: Effect) {
 /// Execute a start effect; returns whether recording actually began, so the
 /// state machine can roll back its optimistic transition on failure.
 fn start(app: &AppHandle, binding_id: &str, hotkey_string: &str) -> bool {
-    let Some(action) = ACTION_MAP.get(binding_id) else {
+    // Per-model hotkey: make that model active first. This never blocks on the
+    // model load, so recording still starts immediately.
+    if let Some(model_id) =
+        binding_id.strip_prefix(crate::settings::MODEL_SWITCH_BINDING_PREFIX)
+    {
+        if let Err(e) = crate::commands::models::prepare_model_for_dictation(app, model_id) {
+            error!("Cannot start dictation with model '{model_id}': {e}");
+            return false;
+        }
+    }
+    let Some(action) = ACTION_MAP.get(action_key(binding_id)) else {
         warn!("No action in ACTION_MAP for '{binding_id}'");
         return false;
     };
@@ -702,7 +725,7 @@ fn start(app: &AppHandle, binding_id: &str, hotkey_string: &str) -> bool {
 }
 
 fn stop(app: &AppHandle, binding_id: &str, hotkey_string: &str) {
-    let Some(action) = ACTION_MAP.get(binding_id) else {
+    let Some(action) = ACTION_MAP.get(action_key(binding_id)) else {
         warn!("No action in ACTION_MAP for '{binding_id}'");
         return;
     };

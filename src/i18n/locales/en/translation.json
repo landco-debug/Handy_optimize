@@ -187,6 +187,12 @@
           "reset": "Failed to reset shortcut to original value"
         }
       },
+      "modelHotkeys": {
+        "title": "Model Hotkeys",
+        "description": "Assign a key to a model: pressing it selects that model and starts dictation with it right away.",
+        "rowDescription": "Press this key to start dictating with this model.",
+        "notSet": "Not set"
+      },
       "language": {
         "title": "Language",
         "description": "Select the language for speech recognition. Auto will automatically determine the language, while selecting a specific language can improve accuracy for that language.",

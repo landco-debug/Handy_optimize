@@ -296,7 +296,20 @@ fn initialize_core_logic(app_handle: &AppHandle) {
                 let settings = settings::get_settings(app);
                 if settings::update_checks_effectively_enabled(&settings) {
                     show_main_window(app);
-                    let _ = app.emit("check-for-updates", ());
+                    // The settings page may be reloading after being parked, so
+                    // give its `check-for-updates` listener time to register.
+                    #[cfg(target_os = "macos")]
+                    {
+                        let app_clone = app.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            let _ = app_clone.emit("check-for-updates", ());
+                        });
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let _ = app.emit("check-for-updates", ());
+                    }
                 }
             }
             "copy_last_transcript" => {

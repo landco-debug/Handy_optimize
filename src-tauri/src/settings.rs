@@ -547,7 +547,7 @@ fn default_autostart_enabled() -> bool {
 }
 
 fn default_update_checks_enabled() -> bool {
-    true
+    false
 }
 
 fn default_show_whats_new_on_update() -> bool {
@@ -1011,6 +1011,25 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     settings
 }
 
+fn clear_global_transcribe_when_model_hotkeys_present(settings: &mut AppSettings) -> bool {
+    let has_model_hotkey = settings.bindings.iter().any(|(id, binding)| {
+        is_model_switch_binding(id) && !binding.current_binding.trim().is_empty()
+    });
+    if !has_model_hotkey {
+        return false;
+    }
+
+    let Some(global) = settings.bindings.get_mut("transcribe") else {
+        return false;
+    };
+    if global.current_binding.trim().is_empty() {
+        return false;
+    }
+
+    global.current_binding.clear();
+    true
+}
+
 pub fn get_settings(app: &AppHandle) -> AppSettings {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1039,6 +1058,13 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
                 entry.insert(value);
                 updated = true;
             }
+        }
+
+        // Fork invariant: once at least one model has its own hotkey, the
+        // global transcribe hotkey is genuinely unassigned. This also repairs
+        // stores produced by earlier fork builds that allowed both at once.
+        if clear_global_transcribe_when_model_hotkeys_present(&mut settings) {
+            updated = true;
         }
 
         if updated {
@@ -1220,6 +1246,17 @@ pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
     settings.bindings
 }
 
+/// Prefix of the dynamic per-model hotkey bindings. A binding with id
+/// `switch_model:<model_id>` makes that model active and starts a dictation
+/// with it (activation mode as for the main transcribe hotkey). These
+/// bindings only exist in `AppSettings::bindings` once the user has assigned a
+/// key to a model (there is no default), and are removed when it is cleared.
+pub const MODEL_SWITCH_BINDING_PREFIX: &str = "switch_model:";
+
+pub fn is_model_switch_binding(id: &str) -> bool {
+    id.starts_with(MODEL_SWITCH_BINDING_PREFIX)
+}
+
 pub fn get_stored_binding(settings: &AppSettings, id: &str) -> Result<ShortcutBinding, String> {
     settings
         .bindings
@@ -1258,6 +1295,29 @@ mod tests {
         let result = get_stored_binding(&settings, "unknown");
 
         assert_eq!(result.unwrap_err(), "Binding with id 'unknown' not found");
+    }
+
+    #[test]
+    fn model_hotkey_disables_global_transcribe_binding() {
+        let mut settings = get_default_settings();
+        settings.bindings.insert(
+            format!("{}small", MODEL_SWITCH_BINDING_PREFIX),
+            ShortcutBinding {
+                id: format!("{}small", MODEL_SWITCH_BINDING_PREFIX),
+                name: "Small".to_string(),
+                description: String::new(),
+                default_binding: String::new(),
+                current_binding: "f13".to_string(),
+            },
+        );
+
+        assert!(clear_global_transcribe_when_model_hotkeys_present(
+            &mut settings
+        ));
+        assert!(settings.bindings["transcribe"].current_binding.is_empty());
+        assert!(!clear_global_transcribe_when_model_hotkeys_present(
+            &mut settings
+        ));
     }
 
     fn default_settings_json() -> serde_json::Value {

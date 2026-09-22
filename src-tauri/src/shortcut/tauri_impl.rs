@@ -33,8 +33,22 @@ pub fn init_shortcuts(app: &AppHandle) {
             .cloned()
             .unwrap_or(default_binding);
 
+        if binding.current_binding.trim().is_empty() {
+            continue;
+        }
+
         if let Err(e) = register_shortcut(app, binding) {
             error!("Failed to register shortcut {} during init: {}", id, e);
+        }
+    }
+
+    // Per-model hotkeys only exist in the user's settings (no defaults).
+    for (id, binding) in &user_settings.bindings {
+        if !settings::is_model_switch_binding(id) {
+            continue;
+        }
+        if let Err(e) = register_shortcut(app, binding.clone()) {
+            error!("Failed to register model hotkey {} during init: {}", id, e);
         }
     }
 }

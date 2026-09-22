@@ -83,7 +83,11 @@ pub async fn delete_model(
 
     model_manager
         .delete_model(&model_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // A deleted model's hotkey would otherwise stay registered but invisible.
+    crate::shortcut::remove_model_binding(&app_handle, &model_id);
+    Ok(())
 }
 
 /// Shared logic for switching the active model, used by both the Tauri command
@@ -154,6 +158,89 @@ pub fn switch_active_model(app: &AppHandle, model_id: &str) -> Result<(), String
         write_settings(app, settings);
         return Err(e.to_string());
     }
+
+    Ok(())
+}
+
+/// Make `model_id` the active model for a dictation that is starting right
+/// now (per-model hotkeys).
+///
+/// Unlike [`switch_active_model`] this never blocks on the model load, which
+/// can take seconds: the selection is persisted immediately and the load runs
+/// on a background thread while recording starts. The thread holds the loading
+/// flag, and both transcription and the live stream worker wait on that flag,
+/// so audio captured while the model loads is not lost. If the model cannot
+/// be loaded the previous selection is restored.
+pub fn prepare_model_for_dictation(app: &AppHandle, model_id: &str) -> Result<(), String> {
+    let model_manager = app.state::<Arc<ModelManager>>();
+    let transcription_manager = Arc::clone(&app.state::<Arc<TranscriptionManager>>());
+
+    let model_info = model_manager
+        .get_model_info(model_id)
+        .ok_or_else(|| format!("Model not found: {}", model_id))?;
+    if !model_info.is_downloaded {
+        return Err(format!("Model not downloaded: {}", model_id));
+    }
+
+    let mut settings = get_settings(app);
+    let previous_model = settings.selected_model.clone();
+    if previous_model != model_id {
+        settings.selected_model = model_id.to_string();
+        write_settings(app, settings);
+        let _ = app.emit(
+            "model-state-changed",
+            ModelStateEvent {
+                event_type: "selection_changed".to_string(),
+                model_id: Some(model_id.to_string()),
+                model_name: Some(model_info.name.clone()),
+                error: None,
+            },
+        );
+    }
+
+    if transcription_manager.get_current_model().as_deref() == Some(model_id) {
+        return Ok(());
+    }
+
+    // Claim the loading slot before recording starts, so nothing that runs
+    // next (initiate_model_load, transcribe) can slip past a load that is
+    // about to begin. If another load is already running, the background
+    // thread waits for it instead.
+    let claimed = transcription_manager.try_start_loading();
+    let app_handle = app.clone();
+    let model_id = model_id.to_string();
+    std::thread::spawn(move || {
+        let tm = Arc::clone(&app_handle.state::<Arc<TranscriptionManager>>());
+        let _loading_guard = match claimed {
+            Some(guard) => guard,
+            None => {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    if let Some(guard) = tm.try_start_loading() {
+                        break guard;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        error!("Timed out waiting to load model '{}'", model_id);
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        };
+
+        // The wait above may have ended with this very model already loaded.
+        if tm.get_current_model().as_deref() != Some(model_id.as_str()) {
+            if let Err(e) = tm.load_model(&model_id) {
+                error!("Failed to load model '{}' for dictation: {}", model_id, e);
+                let mut settings = get_settings(&app_handle);
+                if settings.selected_model == model_id {
+                    settings.selected_model = previous_model;
+                    write_settings(&app_handle, settings);
+                }
+            }
+        }
+        crate::tray::update_tray_menu(&app_handle);
+    });
 
     Ok(())
 }

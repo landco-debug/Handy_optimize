@@ -7,6 +7,7 @@ import { SettingContainer } from "../ui/SettingContainer";
 import { useSettings } from "../../hooks/useSettings";
 import { useOsType } from "../../hooks/useOsType";
 import { commands } from "@/bindings";
+import { emptyModelHotkey, isModelHotkeyId } from "@/lib/modelHotkeys";
 import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SECURE_INPUT_HELP_URL } from "../SecureInputWarning";
@@ -16,6 +17,7 @@ interface HandyKeysShortcutInputProps {
   grouped?: boolean;
   shortcutId: string;
   disabled?: boolean;
+  label?: string;
 }
 
 interface HandyKeysEvent {
@@ -30,6 +32,7 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
   grouped = false,
   shortcutId,
   disabled = false,
+  label,
 }) => {
   const { t } = useTranslation();
   const { getSetting, updateBinding, resetBinding, isUpdating, isLoading } =
@@ -288,7 +291,12 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     );
   }
 
-  const binding = bindings[shortcutId];
+  // Per-model hotkeys are created on first assignment, so a model without
+  // one has no stored binding yet: show an empty, assignable row instead.
+  const isModelHotkey = isModelHotkeyId(shortcutId);
+  const binding =
+    bindings[shortcutId] ??
+    (isModelHotkey ? emptyModelHotkey(shortcutId, label ?? shortcutId) : undefined);
   if (!binding) {
     return (
       <SettingContainer
@@ -305,14 +313,21 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
   }
 
   // Get translated name and description for the binding
-  const translatedName = t(
-    `settings.general.shortcut.bindings.${shortcutId}.name`,
-    binding.name,
-  );
-  const translatedDescription = t(
-    `settings.general.shortcut.bindings.${shortcutId}.description`,
-    binding.description,
-  );
+  const translatedName =
+    label ??
+    t(
+      `settings.general.shortcut.bindings.${shortcutId}.name`,
+      binding.name,
+    );
+  const translatedDescription = isModelHotkey
+    ? t(
+        "settings.general.modelHotkeys.rowDescription",
+        "Press this key to start dictating with this model.",
+      )
+    : t(
+        `settings.general.shortcut.bindings.${shortcutId}.description`,
+        binding.description,
+      );
 
   return (
     <SettingContainer
@@ -336,13 +351,22 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
             className="px-2 py-1 text-sm font-semibold bg-mid-gray/10 border border-mid-gray/80 hover:bg-logo-primary/10 rounded-md cursor-pointer hover:border-logo-primary"
             onClick={startRecording}
           >
-            {formatKeyCombination(binding.current_binding, osType)}
+            {binding.current_binding
+              ? formatKeyCombination(binding.current_binding, osType)
+              : t("settings.general.modelHotkeys.notSet", "Not set")}
           </div>
         )}
-        <ResetButton
-          onClick={() => resetBinding(shortcutId)}
-          disabled={isUpdating(`binding_${shortcutId}`)}
-        />
+        {(!isModelHotkey || binding.current_binding) && (
+          <ResetButton
+            onClick={() =>
+              // Model hotkeys have no default: "reset" clears the key.
+              isModelHotkey
+                ? updateBinding(shortcutId, "").catch(console.error)
+                : resetBinding(shortcutId)
+            }
+            disabled={isUpdating(`binding_${shortcutId}`)}
+          />
+        )}
       </div>
     </SettingContainer>
   );
