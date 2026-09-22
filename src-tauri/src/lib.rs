@@ -450,7 +450,17 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     // tauri-plugin-autostart elsewhere)
     autostart::apply_autostart(app_handle, settings.autostart_enabled);
 
-    // Create the recording overlay window (hidden by default)
+    // On macOS, do not create a recording WebView when the indicator is disabled.
+    // This keeps a hidden-start launch free of UI WebViews until the user opens
+    // settings or explicitly enables the recording indicator.
+    #[cfg(target_os = "macos")]
+    {
+        if settings.overlay_style != settings::OverlayStyle::None {
+            utils::create_recording_overlay(app_handle);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     utils::create_recording_overlay(app_handle);
 }
 

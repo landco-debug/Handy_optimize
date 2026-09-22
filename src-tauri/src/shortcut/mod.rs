@@ -977,8 +977,25 @@ pub fn change_overlay_style_setting(app: AppHandle, style: String) -> Result<(),
     // resumes) emitting on the next audio callback.
     crate::overlay::update_overlay_enabled_cache(parsed != OverlayStyle::None);
 
-    // Reposition in case the window needs to re-center for the new style.
-    crate::utils::update_overlay_position(&app);
+    if parsed == OverlayStyle::None {
+        crate::utils::hide_recording_overlay(&app);
+    } else {
+        #[cfg(target_os = "macos")]
+        {
+            if app.get_webview_window("recording_overlay").is_none() {
+                let handle = app.clone();
+                app.run_on_main_thread(move || {
+                    crate::utils::create_recording_overlay(&handle);
+                    crate::utils::update_overlay_position(&handle);
+                })
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
+
+        // Reposition in case the window needs to re-center for the new style.
+        crate::utils::update_overlay_position(&app);
+    }
 
     Ok(())
 }
