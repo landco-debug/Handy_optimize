@@ -4,6 +4,14 @@
 
 **A free, open source, and extensible speech-to-text application that works completely offline.**
 
+## Astra handoff: macOS memory/lifecycle experiments
+
+A detailed Russian-language report covering the fork history, memory measurements, regressions, hypotheses, branch/commit map, and the current repeated-restart/WebView-input problem is here:
+
+**[Отчёт для Astra: история оптимизации Handy на macOS и текущая проблема](docs/ASTRA_HANDOFF_REPORT_RU.md)**
+
+Use this report as the starting context before making further lifecycle changes.
+
 Handy is a cross-platform desktop application that provides simple, privacy-focused speech transcription. Press a shortcut, speak, and have your words appear in any text field. This happens on your own computer without sending any information to the cloud.
 
 ## Why Handy?
