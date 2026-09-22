@@ -1,44 +1,54 @@
 name: "Build Test"
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   build-test:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: "macos-26" # for Arm based macs (M1 and above). Uses macOS 26 for Apple Intelligence SDK.
-            args: "--target aarch64-apple-darwin"
-            target: "aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
-            args: "--target x86_64-apple-darwin"
-            target: "x86_64-apple-darwin"
-          - platform: "ubuntu-22.04" # Build .deb on 22.04
-            args: "--bundles deb"
-            target: "x86_64-unknown-linux-gnu"
-          - platform: "ubuntu-24.04" # Build AppImage and RPM on 24.04
-            args: "--bundles appimage,rpm"
-            target: "x86_64-unknown-linux-gnu"
-          - platform: "ubuntu-24.04-arm" # Build for ARM64 Linux
-            args: "--bundles appimage,deb,rpm"
-            target: "aarch64-unknown-linux-gnu"
-          - platform: "windows-latest"
-            args: ""
-            target: "x86_64-pc-windows-msvc"
-          - platform: "windows-11-arm" # for ARM64 Windows runner
-            args: "--target aarch64-pc-windows-msvc"
-            target: "aarch64-pc-windows-msvc"
+    runs-on: macos-26
 
-    uses: ./.github/workflows/build.yml
-    with:
-      platform: ${{ matrix.platform }}
-      target: ${{ matrix.target }}
-      build-args: ${{ matrix.args }}
-      sign-binaries: false
-      asset-prefix: "handy-test"
-      upload-artifacts: true
-      is-debug-build: ${{ contains(matrix.args, '--debug') }}
-    secrets: inherit
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: macos-26-aarch64-apple-darwin-no-bin-v1
+          cache-bin: false
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Disable updater signing
+        run: |
+          bun -e '
+          const path = "src-tauri/tauri.conf.json";
+          const config = await Bun.file(path).json();
+          config.bundle.createUpdaterArtifacts = false;
+          await Bun.write(path, JSON.stringify(config, null, 2) + "\n");
+          '
+
+      - name: Build Handy for Apple Silicon
+        run: bun tauri build --target aarch64-apple-darwin --bundles app,dmg
+
+      - name: Upload macOS ARM64 build
+        uses: actions/upload-artifact@v7
+        with:
+          name: Handy-macOS-Apple-Silicon
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 30
