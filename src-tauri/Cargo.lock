@@ -2504,6 +2504,7 @@ name = "handy"
 version = "0.9.7"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "cpal",
@@ -2538,6 +2539,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "security-framework",
  "sha2",
  "signal-hook",
  "specta",
