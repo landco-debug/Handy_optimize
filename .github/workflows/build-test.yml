@@ -2,6 +2,9 @@ name: "Build Test"
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature-chatgpt-account-postprocessing
 
 jobs:
   build-test:
