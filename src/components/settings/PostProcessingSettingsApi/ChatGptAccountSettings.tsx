@@ -71,10 +71,15 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
     return () => {
       mounted.current = false;
     };
-    // The provider owns this component, so status is intentionally read once
-    // per mount. onAuthenticated is only a post-login model refresh hook.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (login) {
+        void invoke("cancel_codex_device_login");
+      }
+    };
+  }, [login]);
 
   const signIn = async () => {
     setBusy(true);
