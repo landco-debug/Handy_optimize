@@ -368,11 +368,12 @@ mod platform {
             let response = client
                 .post(OAUTH_TOKEN_URL)
                 .timeout(REQUEST_TIMEOUT)
-                .json(&json!({
-                    "client_id": CLIENT_ID,
-                    "grant_type": "refresh_token",
-                    "refresh_token": tokens.refresh_token,
-                }))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .form(&[
+                    ("client_id", CLIENT_ID),
+                    ("grant_type", "refresh_token"),
+                    ("refresh_token", tokens.refresh_token.as_str()),
+                ])
                 .send()
                 .await
                 .map_err(|e| format!("ChatGPT token refresh failed: {e}"))?;
