@@ -821,7 +821,6 @@ pub fn run(cli_args: CliArgs) {
             commands::get_codex_account_status,
             commands::start_codex_device_login,
             commands::wait_codex_device_login,
-            commands::cancel_codex_device_login,
             commands::logout_codex_account,
             commands::check_apple_intelligence_available,
             commands::initialize_enigo,
