@@ -438,7 +438,20 @@
           "refreshModels": "Refresh models"
         },
         "chatGptAccount": {
-          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts."
+          "title": "ChatGPT Account",
+          "description": "Use your ChatGPT subscription through Codex device-code authorization. No API key is required.",
+          "signIn": "Sign in with ChatGPT",
+          "signOut": "Sign out of ChatGPT",
+          "connected": "ChatGPT connected",
+          "notConnected": "ChatGPT not connected",
+          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts.",
+          "deviceCodeDisabled": "Device code authorization is disabled in ChatGPT. Open Settings → Security, enable Device code authorization for Codex, then try again.",
+          "enterCode": "Open the ChatGPT authorization page and enter this one-time code:",
+          "copyCode": "Copy code",
+          "openAuthorization": "Open ChatGPT",
+          "waiting": "Waiting for approval…",
+          "timeout": "The approval window expired. Start sign-in again.",
+          "reauthRequired": "The ChatGPT session is invalid or expired. Sign in again."
         }
       },
       "prompts": {
