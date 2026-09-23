@@ -7,6 +7,7 @@ mod autostart;
 mod catalog;
 pub mod cli;
 mod clipboard;
+mod codex_client;
 mod commands;
 mod helpers;
 mod input;
@@ -817,6 +818,10 @@ pub fn run(cli_args: CliArgs) {
             commands::open_recordings_folder,
             commands::open_log_dir,
             commands::open_app_data_dir,
+            commands::get_codex_account_status,
+            commands::start_codex_device_login,
+            commands::wait_codex_device_login,
+            commands::logout_codex_account,
             commands::check_apple_intelligence_available,
             commands::initialize_enigo,
             commands::initialize_shortcuts,
@@ -1179,6 +1184,7 @@ pub fn run(cli_args: CliArgs) {
             if let Some(tm) = app.try_state::<Arc<TranscriptionManager>>() {
                 let _ = tm.unload_model();
             }
+            codex_client::shutdown();
         }
         _ => {}
     });
