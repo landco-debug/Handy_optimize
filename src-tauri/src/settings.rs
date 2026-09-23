@@ -10,6 +10,7 @@ use tauri_plugin_store::StoreExt;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
+pub const CHATGPT_ACCOUNT_PROVIDER_ID: &str = "chatgpt_account";
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
@@ -698,6 +699,20 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             supports_structured_output: true,
         },
     ];
+
+    // ChatGPT subscription access through the official Codex app-server. The
+    // runtime is downloaded lazily only after the user starts sign-in.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        providers.push(PostProcessProvider {
+            id: CHATGPT_ACCOUNT_PROVIDER_ID.to_string(),
+            label: "ChatGPT Account".to_string(),
+            base_url: "codex://chatgpt-account".to_string(),
+            allow_base_url_edit: false,
+            models_endpoint: None,
+            supports_structured_output: true,
+        });
+    }
 
     // Note: We always include Apple Intelligence on macOS ARM64 without checking availability
     // at startup. The availability check is deferred to when the user actually tries to use it
