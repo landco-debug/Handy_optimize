@@ -146,12 +146,6 @@ pub async fn wait_codex_device_login(
 
 #[specta::specta]
 #[tauri::command]
-pub fn cancel_codex_device_login() {
-    crate::codex_client::cancel_device_login();
-}
-
-#[specta::specta]
-#[tauri::command]
 pub async fn logout_codex_account(
     app: AppHandle,
 ) -> Result<crate::codex_client::CodexAccountStatus, String> {
