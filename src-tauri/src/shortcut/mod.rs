@@ -23,7 +23,7 @@ use crate::settings::APPLE_INTELLIGENCE_DEFAULT_MODEL_ID;
 use crate::settings::{
     self, get_settings, AutoSubmitKey, ClipboardHandling, KeyboardImplementation, LLMPrompt,
     OverlayPosition, OverlayStyle, PasteMethod, ShortcutActivation, ShortcutBinding, SoundTheme,
-    Theme, TypingTool, VadBackend, APPLE_INTELLIGENCE_PROVIDER_ID,
+    Theme, TypingTool, VadBackend, APPLE_INTELLIGENCE_PROVIDER_ID, CHATGPT_ACCOUNT_PROVIDER_ID,
 };
 use crate::tray;
 
@@ -1518,6 +1518,10 @@ pub async fn fetch_post_process_models(
         {
             return Err("Apple Intelligence is only available on Apple silicon Macs running macOS 15 or later.".to_string());
         }
+    }
+
+    if provider.id == CHATGPT_ACCOUNT_PROVIDER_ID {
+        return crate::codex_client::fetch_models(&app).await;
     }
 
     // Get API key
