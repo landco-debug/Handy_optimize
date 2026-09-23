@@ -1,5 +1,6 @@
 use serde::Serialize;
 use specta::Type;
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -90,6 +91,7 @@ mod platform {
 
     static PENDING_LOGINS: OnceLock<Mutex<HashMap<String, PendingLogin>>> = OnceLock::new();
     static NEXT_LOGIN_ID: AtomicU64 = AtomicU64::new(1);
+    static LOGIN_CANCEL_GENERATION: AtomicU64 = AtomicU64::new(0);
     static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     static REFRESH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
@@ -542,10 +544,14 @@ mod platform {
             .remove(&login_id)
             .ok_or_else(|| "ChatGPT sign-in session expired. Start sign-in again.".to_string())?;
 
+        let cancellation_generation = LOGIN_CANCEL_GENERATION.load(Ordering::Acquire);
         let client = http_client()?;
         let deadline = Instant::now() + LOGIN_TIMEOUT;
 
         loop {
+            if LOGIN_CANCEL_GENERATION.load(Ordering::Acquire) != cancellation_generation {
+                return Err("CHATGPT_DEVICE_CODE_CANCELLED".to_string());
+            }
             if Instant::now() >= deadline {
                 return Err("CHATGPT_DEVICE_CODE_TIMEOUT".to_string());
             }
@@ -594,12 +600,17 @@ mod platform {
         }
     }
 
-    pub async fn logout(_app: &AppHandle) -> Result<CodexAccountStatus, String> {
-        delete_tokens()?;
+    pub fn cancel_device_login() {
+        LOGIN_CANCEL_GENERATION.fetch_add(1, Ordering::AcqRel);
         pending_logins()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
+    }
+
+    pub async fn logout(_app: &AppHandle) -> Result<CodexAccountStatus, String> {
+        cancel_device_login();
+        delete_tokens()?;
         Ok(status_from_tokens(None))
     }
 
@@ -835,8 +846,8 @@ Return only the transformed transcript text, with no commentary or wrapper."
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use platform::{
-    account_status, fetch_models, logout, post_process, shutdown, start_device_login,
-    wait_device_login,
+    account_status, cancel_device_login, fetch_models, logout, post_process, shutdown,
+    start_device_login, wait_device_login,
 };
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -864,6 +875,9 @@ pub async fn wait_device_login(_login_id: String) -> Result<CodexAccountStatus, 
             .to_string(),
     )
 }
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn cancel_device_login() {}
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub async fn logout(app: &AppHandle) -> Result<CodexAccountStatus, String> {
