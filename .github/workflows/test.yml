@@ -2,9 +2,10 @@ name: "test"
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature-chatgpt-account-postprocessing]
     paths:
       - "src-tauri/**"
+      - ".github/workflows/test.yml"
   pull_request:
     paths:
       - "src-tauri/**"
