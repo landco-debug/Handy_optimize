@@ -220,11 +220,12 @@ See the [Troubleshooting](README.md#troubleshooting) section in README.md.
 
 ## Fork feature: ChatGPT account post-processing
 
-- Provider id: `chatgpt_account`; currently exposed only on Apple Silicon macOS.
-- Authentication uses the official OpenAI Codex app-server device-code flow: `account/login/start` with `chatgptDeviceCode`, followed by `account/login/completed`. Do not replace this with ChatGPT cookies, browser-session scraping, or private web endpoints.
-- Handy lazily downloads the pinned official `codex-app-server` 0.155.0 runtime only when sign-in starts, verifies SHA-256, and stores it under Handy app data. Normal launches do not download or start Codex unless the ChatGPT provider is used.
-- Handy uses a separate `CODEX_HOME` under its own app data and configures Codex auth for OS keyring storage, so it does not reuse or overwrite the user's normal Codex CLI login.
-- Post-processing creates an ephemeral, read-only, approval-free Codex thread with a strict output schema. Existing API providers and Apple Intelligence remain independent.
-- The UI must show the ChatGPT Security prerequisite before sign-in: device-code authorization for Codex is disabled by default for many accounts.
-- A pending device-code login must remain cancellable; cancellation uses an atomic flag so the UI command never blocks behind the app-server session mutex.
+- Provider id: `chatgpt_account`; currently exposed only on Apple Silicon macOS until real-account end-to-end validation is complete.
+- Authentication mirrors Cribe and the open-source Codex client directly: request a device code from `auth.openai.com`, poll for approval, exchange the authorization code for OAuth tokens, and refresh the access token as needed.
+- Do **not** replace this with ChatGPT cookies, browser-session scraping, a copied `auth.json`, or a downloaded/spawned Codex runtime. The earlier app-server prototype was intentionally replaced after verifying Cribe's actual implementation.
+- OAuth secrets are stored only in macOS Keychain. Prefer Data Protection Keychain; ad-hoc test builds may fall back to Login Keychain when the protected keychain entitlement is unavailable.
+- Post-processing calls `https://chatgpt.com/backend-api/codex/responses` directly and model discovery calls the matching Codex models endpoint. Keep the protocol constants centralized in `src-tauri/src/codex_client.rs`.
+- Refresh requests must remain serialized because refresh tokens can rotate; never issue concurrent refreshes with the same stored token.
+- Transcription text is untrusted data. Keep it in the user input, keep transformation instructions separate, expose no tools, and never log tokens or transcript-bearing response bodies.
+- Existing API providers and Apple Intelligence remain independent. Any ChatGPT failure must fall back to the original local transcription rather than losing user text.
 - Main backend: `src-tauri/src/codex_client.rs`. Frontend: `src/components/settings/PostProcessingSettingsApi/ChatGptAccountSettings.tsx`.
