@@ -411,10 +411,10 @@
         "title": "Hotkey"
       },
       "api": {
-        "title": "API (OpenAI Compatible)",
+        "title": "Cloud AI / API",
         "provider": {
           "title": "Provider",
-          "description": "Select an OpenAI-compatible provider."
+          "description": "Select a cloud AI provider or connect a ChatGPT account."
         },
         "appleIntelligence": {
           "unavailable": "Apple Intelligence is not available on this device. Requires an Apple Silicon Mac running macOS Tahoe (26.0) or later with Apple Intelligence enabled in System Settings."

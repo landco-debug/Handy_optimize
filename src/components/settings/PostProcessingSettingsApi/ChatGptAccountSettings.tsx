@@ -39,7 +39,11 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
 
     void invoke<CodexAccountStatus>("get_codex_account_status")
       .then((next) => {
-        if (mounted.current) setStatus(next);
+        if (!mounted.current) return;
+        setStatus(next);
+        if (next.signedIn) {
+          onAuthenticated();
+        }
       })
       .catch((cause) => {
         if (mounted.current) setError(String(cause));
@@ -48,7 +52,7 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
     return () => {
       mounted.current = false;
     };
-  }, []);
+  }, [onAuthenticated]);
 
   const signIn = async () => {
     setBusy(true);

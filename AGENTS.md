@@ -216,3 +216,13 @@ See the [Troubleshooting](README.md#troubleshooting) section in README.md.
 - **Full contributor workflow:** [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Commits:** Use conventional commit prefixes (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`). Focus the message on _why_, not _what_.
+
+
+## Fork feature: ChatGPT account post-processing
+
+- Provider id: `chatgpt_account`; currently exposed only on Apple Silicon macOS.
+- Authentication uses the official OpenAI Codex app-server device-code flow: `account/login/start` with `chatgptDeviceCode`, followed by `account/login/completed`. Do not replace this with ChatGPT cookies, browser-session scraping, or private web endpoints.
+- Handy lazily downloads the pinned official `codex-app-server` 0.155.0 runtime only when sign-in starts, verifies SHA-256, and stores it under Handy app data. Normal launches do not download or start Codex unless the ChatGPT provider is used.
+- Handy uses a separate `CODEX_HOME` under its own app data and configures Codex auth for OS keyring storage, so it does not reuse or overwrite the user's normal Codex CLI login.
+- Post-processing creates an ephemeral, read-only, approval-free Codex thread with a strict output schema. Existing API providers and Apple Intelligence remain independent.
+- Main backend: `src-tauri/src/codex_client.rs`. Frontend: `src/components/settings/PostProcessingSettingsApi/ChatGptAccountSettings.tsx`.
