@@ -7,7 +7,10 @@ use crate::managers::history::HistoryManager;
 use crate::managers::model::ModelManager;
 use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::TranscriptionManager;
-use crate::settings::{get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID};
+use crate::settings::{
+    get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID,
+    CHATGPT_ACCOUNT_PROVIDER_ID,
+};
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
 use crate::utils::{
@@ -119,7 +122,11 @@ fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool
     style == OverlayStyle::Live && is_streaming
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+async fn post_process_transcription(
+    app: &AppHandle,
+    settings: &AppSettings,
+    transcription: &str,
+) -> Option<String> {
     if is_blank_transcription(transcription) {
         debug!("Post-processing skipped because the transcription is empty");
         return None;
@@ -139,7 +146,7 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         .cloned()
         .unwrap_or_default();
 
-    if model.trim().is_empty() {
+    if model.trim().is_empty() && provider.id != CHATGPT_ACCOUNT_PROVIDER_ID {
         debug!(
             "Post-processing skipped because provider '{}' has no model configured",
             provider.id
@@ -190,6 +197,44 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
     // benefits from it and it adds seconds of latency. llm_client picks the
     // field the endpoint understands and retries without it if rejected.
     let disable_reasoning = matches!(provider.id.as_str(), "custom" | "openrouter");
+
+    if provider.id == CHATGPT_ACCOUNT_PROVIDER_ID {
+        let system_prompt = build_system_prompt(&prompt);
+        let selected_model = if model.trim().is_empty() {
+            None
+        } else {
+            Some(model.clone())
+        };
+
+        return match crate::codex_client::post_process(
+            app,
+            selected_model,
+            system_prompt,
+            transcription.to_string(),
+        )
+        .await
+        {
+            Ok(Some(content)) if !content.trim().is_empty() => {
+                let result = strip_invisible_chars(&content);
+                debug!(
+                    "ChatGPT account post-processing succeeded. Output length: {} chars",
+                    result.len()
+                );
+                Some(result)
+            }
+            Ok(_) => {
+                debug!("ChatGPT account post-processing returned no content");
+                None
+            }
+            Err(error) => {
+                error!(
+                    "ChatGPT account post-processing failed: {}. Falling back to original transcription.",
+                    error
+                );
+                None
+            }
+        };
+    }
 
     if provider.supports_structured_output {
         debug!("Using structured outputs for provider '{}'", provider.id);
@@ -441,7 +486,7 @@ pub(crate) async fn process_transcription_output(
     }
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+        if let Some(processed_text) = post_process_transcription(app, &settings, &final_text).await {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
 
