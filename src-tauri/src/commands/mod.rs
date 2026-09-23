@@ -120,6 +120,38 @@ pub fn open_app_data_dir(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[specta::specta]
+#[tauri::command]
+pub async fn get_codex_account_status(
+    app: AppHandle,
+) -> Result<crate::codex_client::CodexAccountStatus, String> {
+    crate::codex_client::account_status(&app).await
+}
+
+#[specta::specta]
+#[tauri::command]
+pub async fn start_codex_device_login(
+    app: AppHandle,
+) -> Result<crate::codex_client::CodexDeviceLogin, String> {
+    crate::codex_client::start_device_login(&app).await
+}
+
+#[specta::specta]
+#[tauri::command]
+pub async fn wait_codex_device_login(
+    login_id: String,
+) -> Result<crate::codex_client::CodexAccountStatus, String> {
+    crate::codex_client::wait_device_login(login_id).await
+}
+
+#[specta::specta]
+#[tauri::command]
+pub async fn logout_codex_account(
+    app: AppHandle,
+) -> Result<crate::codex_client::CodexAccountStatus, String> {
+    crate::codex_client::logout(&app).await
+}
+
 /// Check if Apple Intelligence is available on this device.
 /// Called by the frontend when the user selects Apple Intelligence provider.
 #[specta::specta]
