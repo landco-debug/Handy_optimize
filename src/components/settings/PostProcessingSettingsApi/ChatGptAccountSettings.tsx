@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { LogOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -128,6 +129,16 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
     }
   };
 
+  const openVerificationPage = async () => {
+    if (!login) return;
+
+    try {
+      await openUrl(login.verificationUrl);
+    } catch (cause) {
+      if (mounted.current) setError(messageForError(cause));
+    }
+  };
+
   const accountText = status?.signedIn
     ? [status.email, status.planType].filter(Boolean).join(" · ") ||
       t("settings.postProcessing.api.chatGptAccount.connected")
@@ -202,16 +213,15 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <a
-              href={login.verificationUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-9 items-center rounded-md border border-mid-gray/30 px-3 text-sm font-medium hover:bg-mid-gray/10"
+            <Button
+              onClick={openVerificationPage}
+              variant="secondary"
+              size="sm"
             >
               {t(
                 "settings.postProcessing.api.chatGptAccount.openAuthorization",
               )}
-            </a>
+            </Button>
             <span className="text-xs text-mid-gray">
               {t("settings.postProcessing.api.chatGptAccount.waiting")}
             </span>
