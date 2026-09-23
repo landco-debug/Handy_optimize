@@ -700,17 +700,18 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
         },
     ];
 
-    // ChatGPT subscription access through the official Codex app-server. The
-    // runtime is downloaded lazily only after the user starts sign-in.
+    // ChatGPT subscription access through the same direct Codex device-code
+    // protocol used by Cribe and the open-source Codex client. No browser
+    // cookies, API key, or bundled/downloaded Codex runtime is involved.
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         providers.push(PostProcessProvider {
             id: CHATGPT_ACCOUNT_PROVIDER_ID.to_string(),
             label: "ChatGPT Account".to_string(),
-            base_url: "codex://chatgpt-account".to_string(),
+            base_url: "https://chatgpt.com/backend-api/codex".to_string(),
             allow_base_url_edit: false,
             models_endpoint: None,
-            supports_structured_output: true,
+            supports_structured_output: false,
         });
     }
 
