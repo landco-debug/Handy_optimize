@@ -430,6 +430,9 @@
           "placeholderWithOptions": "חפש או בחר מודל",
           "placeholderNoOptions": "הקלד שם מודל",
           "refreshModels": "רענן מודלים"
+        },
+        "chatGptAccount": {
+          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts."
         }
       },
       "prompts": {

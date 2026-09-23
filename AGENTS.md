@@ -225,4 +225,6 @@ See the [Troubleshooting](README.md#troubleshooting) section in README.md.
 - Handy lazily downloads the pinned official `codex-app-server` 0.155.0 runtime only when sign-in starts, verifies SHA-256, and stores it under Handy app data. Normal launches do not download or start Codex unless the ChatGPT provider is used.
 - Handy uses a separate `CODEX_HOME` under its own app data and configures Codex auth for OS keyring storage, so it does not reuse or overwrite the user's normal Codex CLI login.
 - Post-processing creates an ephemeral, read-only, approval-free Codex thread with a strict output schema. Existing API providers and Apple Intelligence remain independent.
+- The UI must show the ChatGPT Security prerequisite before sign-in: device-code authorization for Codex is disabled by default for many accounts.
+- A pending device-code login must remain cancellable; cancellation uses an atomic flag so the UI command never blocks behind the app-server session mutex.
 - Main backend: `src-tauri/src/codex_client.rs`. Frontend: `src/components/settings/PostProcessingSettingsApi/ChatGptAccountSettings.tsx`.

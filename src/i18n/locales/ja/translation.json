@@ -430,6 +430,9 @@
           "placeholderWithOptions": "モデルを検索または選択",
           "placeholderNoOptions": "モデル名を入力",
           "refreshModels": "モデルを更新"
+        },
+        "chatGptAccount": {
+          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts."
         }
       },
       "prompts": {

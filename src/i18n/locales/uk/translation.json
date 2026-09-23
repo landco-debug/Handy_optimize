@@ -430,6 +430,9 @@
           "placeholderWithOptions": "Шукайте або оберіть модель",
           "placeholderNoOptions": "Введіть назву моделі",
           "refreshModels": "Оновити моделі"
+        },
+        "chatGptAccount": {
+          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts."
         }
       },
       "prompts": {

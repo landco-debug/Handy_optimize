@@ -35,6 +35,7 @@ mod platform {
     use std::path::{Path, PathBuf};
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use tauri::AppHandle;
@@ -47,6 +48,8 @@ mod platform {
 
     const RPC_TIMEOUT: Duration = Duration::from_secs(45);
     const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+    const LOGIN_CANCEL_POLL: Duration = Duration::from_millis(250);
+    const LOGIN_CANCELLED_ERROR: &str = "ChatGPT authorization was cancelled.";
     const TURN_TIMEOUT: Duration = Duration::from_secs(90);
 
     type TransportLine = Result<Value, String>;
@@ -60,6 +63,7 @@ mod platform {
     }
 
     static SESSION: OnceLock<Mutex<Option<CodexProcess>>> = OnceLock::new();
+    static LOGIN_CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
     fn session_slot() -> &'static Mutex<Option<CodexProcess>> {
         SESSION.get_or_init(|| Mutex::new(None))
@@ -512,6 +516,8 @@ mod platform {
         }
 
         fn start_device_login(&mut self) -> Result<CodexDeviceLogin, String> {
+            LOGIN_CANCEL_REQUESTED.store(false, Ordering::Release);
+
             let result = self.request(
                 "account/login/start",
                 Some(json!({ "type": "chatgptDeviceCode" })),
@@ -530,13 +536,67 @@ mod platform {
         }
 
         fn wait_device_login(&mut self, login_id: &str) -> Result<CodexAccountStatus, String> {
-            let notification = self.wait_notification(LOGIN_TIMEOUT, |message| {
+            let predicate = |message: &Value| {
                 message.get("method").and_then(Value::as_str)
                     == Some("account/login/completed")
                     && message.pointer("/params/loginId").and_then(Value::as_str)
                         == Some(login_id)
-            })?;
+            };
 
+            if let Some(notification) = self.take_pending_notification(&predicate) {
+                return self.finish_device_login(notification);
+            }
+
+            let deadline = Instant::now() + LOGIN_TIMEOUT;
+            loop {
+                if LOGIN_CANCEL_REQUESTED.load(Ordering::Acquire) {
+                    // Cancel on the same app-server session that owns the login.
+                    // The public cancel command only flips the atomic flag, so it
+                    // never waits behind the session mutex held by this function.
+                    let _ = self.request(
+                        "account/login/cancel",
+                        Some(json!({ "loginId": login_id })),
+                        RPC_TIMEOUT,
+                    );
+                    return Err(LOGIN_CANCELLED_ERROR.to_string());
+                }
+
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("Timed out waiting for ChatGPT authorization".to_string());
+                }
+
+                let wait_for = remaining.min(LOGIN_CANCEL_POLL);
+                let message = match self.rx.recv_timeout(wait_for) {
+                    Ok(Ok(value)) => value,
+                    Ok(Err(error)) => return Err(error),
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        return Err("Codex app-server transport disconnected".to_string())
+                    }
+                };
+
+                if message.get("method").is_some() && message.get("id").is_some() {
+                    self.respond_to_server_request(&message)?;
+                    continue;
+                }
+
+                if message.get("method").is_some() {
+                    if predicate(&message) {
+                        return self.finish_device_login(message);
+                    }
+                    self.pending_notifications.push_back(message);
+                    continue;
+                }
+
+                warn!("Ignoring unsolicited Codex response while waiting for login notification");
+            }
+        }
+
+        fn finish_device_login(
+            &mut self,
+            notification: Value,
+        ) -> Result<CodexAccountStatus, String> {
             let params = notification
                 .get("params")
                 .ok_or_else(|| "Codex login completion was missing parameters".to_string())?;
@@ -821,6 +881,10 @@ Return only the value required by the output schema."
         .map_err(|e| format!("Codex login wait task failed: {e}"))?
     }
 
+    pub fn cancel_device_login() {
+        LOGIN_CANCEL_REQUESTED.store(true, Ordering::Release);
+    }
+
     pub async fn logout(app: &AppHandle) -> Result<CodexAccountStatus, String> {
         if !runtime_installed(app) {
             return Ok(CodexAccountStatus {
@@ -909,8 +973,8 @@ Return only the value required by the output schema."
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use platform::{
-    account_status, fetch_models, logout, post_process, shutdown, start_device_login,
-    wait_device_login,
+    account_status, cancel_device_login, fetch_models, logout, post_process, shutdown,
+    start_device_login, wait_device_login,
 };
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -938,6 +1002,9 @@ pub async fn wait_device_login(_login_id: String) -> Result<CodexAccountStatus, 
             .to_string(),
     )
 }
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn cancel_device_login() {}
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 pub async fn logout(app: &AppHandle) -> Result<CodexAccountStatus, String> {

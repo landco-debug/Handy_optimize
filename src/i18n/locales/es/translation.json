@@ -430,6 +430,9 @@
           "placeholderWithOptions": "Buscar o seleccionar un modelo",
           "placeholderNoOptions": "Escribe un nombre de modelo",
           "refreshModels": "Actualizar modelos"
+        },
+        "chatGptAccount": {
+          "deviceCodeNotice": "Before signing in, enable ChatGPT → Settings → Security → Device code authorization for Codex. This setting is off by default for many accounts."
         }
       },
       "prompts": {

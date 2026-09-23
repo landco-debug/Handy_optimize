@@ -436,6 +436,9 @@
           "placeholderWithOptions": "Найдите или выберите модель",
           "placeholderNoOptions": "Введите название модели",
           "refreshModels": "Обновить модели"
+        },
+        "chatGptAccount": {
+          "deviceCodeNotice": "Перед входом включите в ChatGPT: Настройки → Безопасность → «Авторизация кода устройства для Codex». Для многих аккаунтов эта настройка по умолчанию выключена."
         }
       },
       "prompts": {

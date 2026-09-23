@@ -169,8 +169,22 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
   const handleRefreshModels = useCallback(() => {
     if (isAppleProvider) return;
-    void fetchPostProcessModels(selectedProviderId);
-  }, [fetchPostProcessModels, isAppleProvider, selectedProviderId]);
+
+    void (async () => {
+      const models = await fetchPostProcessModels(selectedProviderId);
+      if (isChatGptAccountProvider && !model.trim() && models.length > 0) {
+        // codex_client keeps the account's default model first.
+        await updatePostProcessModel(selectedProviderId, models[0]);
+      }
+    })();
+  }, [
+    fetchPostProcessModels,
+    isAppleProvider,
+    isChatGptAccountProvider,
+    model,
+    selectedProviderId,
+    updatePostProcessModel,
+  ]);
 
   const availableModelsRaw = postProcessModelOptions[selectedProviderId] || [];
 

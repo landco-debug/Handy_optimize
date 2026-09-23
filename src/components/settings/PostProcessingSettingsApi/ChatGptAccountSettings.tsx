@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { LogOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -24,15 +25,26 @@ type Props = {
   onAuthenticated: () => void;
 };
 
+const CHATGPT_LABEL = "ChatGPT";
+
 export const ChatGptAccountSettings: React.FC<Props> = ({
   onAuthenticated,
 }) => {
   const { t } = useTranslation();
   const mounted = useRef(true);
+  const cancelRequested = useRef(false);
+  const modelsRefreshed = useRef(false);
   const [status, setStatus] = useState<CodexAccountStatus | null>(null);
   const [login, setLogin] = useState<CodexDeviceLogin | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const refreshModelsOnce = (next: CodexAccountStatus) => {
+    if (next.signedIn && !modelsRefreshed.current) {
+      modelsRefreshed.current = true;
+      onAuthenticated();
+    }
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -41,9 +53,7 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
       .then((next) => {
         if (!mounted.current) return;
         setStatus(next);
-        if (next.signedIn) {
-          onAuthenticated();
-        }
+        refreshModelsOnce(next);
       })
       .catch((cause) => {
         if (mounted.current) setError(String(cause));
@@ -55,6 +65,7 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
   }, [onAuthenticated]);
 
   const signIn = async () => {
+    cancelRequested.current = false;
     setBusy(true);
     setError(null);
     setLogin(null);
@@ -74,13 +85,27 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
 
       setStatus(next);
       setLogin(null);
-      if (next.signedIn) {
-        onAuthenticated();
+      refreshModelsOnce(next);
+    } catch (cause) {
+      if (mounted.current && !cancelRequested.current) {
+        setError(String(cause));
       }
+    } finally {
+      if (mounted.current) {
+        setLogin(null);
+        setBusy(false);
+      }
+    }
+  };
+
+  const cancelSignIn = async () => {
+    cancelRequested.current = true;
+    setError(null);
+
+    try {
+      await invoke("cancel_codex_device_login");
     } catch (cause) {
       if (mounted.current) setError(String(cause));
-    } finally {
-      if (mounted.current) setBusy(false);
     }
   };
 
@@ -91,6 +116,7 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
     try {
       const next = await invoke<CodexAccountStatus>("logout_codex_account");
       if (mounted.current) {
+        modelsRefreshed.current = false;
         setStatus(next);
         setLogin(null);
       }
@@ -101,14 +127,25 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
     }
   };
 
+  const openVerificationPage = async () => {
+    if (!login) return;
+
+    try {
+      await openUrl(login.verificationUrl);
+    } catch (cause) {
+      if (mounted.current) setError(String(cause));
+    }
+  };
+
   const accountText = status?.signedIn
-    ? [status.email, status.planType].filter(Boolean).join(" · ") || "ChatGPT"
-    : "ChatGPT";
+    ? [status.email, status.planType].filter(Boolean).join(" · ") ||
+      CHATGPT_LABEL
+    : CHATGPT_LABEL;
 
   return (
     <>
       <SettingContainer
-        title="ChatGPT"
+        title={CHATGPT_LABEL}
         description={t("settings.postProcessing.api.provider.description")}
         descriptionMode="tooltip"
         layout="horizontal"
@@ -138,11 +175,17 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
             >
               {busy && !login
                 ? t("common.loading")
-                : t("common.open") + " ChatGPT"}
+                : `${t("common.open")} ${CHATGPT_LABEL}`}
             </Button>
           )}
         </div>
       </SettingContainer>
+
+      {!status?.signedIn && (
+        <Alert variant="warning" contained>
+          {t("settings.postProcessing.api.chatGptAccount.deviceCodeNotice")}
+        </Alert>
+      )}
 
       {login && (
         <div className="space-y-3 rounded-md border border-mid-gray/20 p-4">
@@ -160,17 +203,24 @@ export const ChatGptAccountSettings: React.FC<Props> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <a
-              href={login.verificationUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-9 items-center rounded-md border border-mid-gray/30 px-3 text-sm font-medium hover:bg-mid-gray/10"
+            <Button
+              onClick={openVerificationPage}
+              variant="secondary"
+              size="sm"
             >
               {t("common.open")}
-            </a>
+            </Button>
             <span className="text-xs text-mid-gray">
               {t("onboarding.permissions.waiting")}
             </span>
+            <Button
+              onClick={cancelSignIn}
+              variant="secondary"
+              size="sm"
+              className="ml-auto"
+            >
+              {t("settings.postProcessing.prompts.cancel")}
+            </Button>
           </div>
         </div>
       )}
