@@ -10,6 +10,7 @@ type PostProcessProviderState = {
   selectedProvider: PostProcessProvider | undefined;
   isCustomProvider: boolean;
   isAppleProvider: boolean;
+  isChatGptAccountProvider: boolean;
   appleIntelligenceUnavailable: boolean;
   baseUrl: string;
   handleBaseUrlChange: (value: string) => void;
@@ -29,6 +30,7 @@ type PostProcessProviderState = {
 };
 
 const APPLE_PROVIDER_ID = "apple_intelligence";
+const CHATGPT_ACCOUNT_PROVIDER_ID = "chatgpt_account";
 
 export const usePostProcessProviderState = (): PostProcessProviderState => {
   const {
@@ -57,6 +59,8 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   }, [providers, selectedProviderId]);
 
   const isAppleProvider = selectedProvider?.id === APPLE_PROVIDER_ID;
+  const isChatGptAccountProvider =
+    selectedProvider?.id === CHATGPT_ACCOUNT_PROVIDER_ID;
   const [appleIntelligenceUnavailable, setAppleIntelligenceUnavailable] =
     useState(false);
 
@@ -215,6 +219,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     selectedProvider,
     isCustomProvider,
     isAppleProvider,
+    isChatGptAccountProvider,
     appleIntelligenceUnavailable,
     baseUrl,
     handleBaseUrlChange,
