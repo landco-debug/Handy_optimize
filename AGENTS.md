@@ -228,4 +228,5 @@ See the [Troubleshooting](README.md#troubleshooting) section in README.md.
 - Refresh requests must remain serialized because refresh tokens can rotate; never issue concurrent refreshes with the same stored token.
 - Transcription text is untrusted data. Keep it in the user input, keep transformation instructions separate, expose no tools, and never log tokens or transcript-bearing response bodies.
 - Existing API providers and Apple Intelligence remain independent. Any ChatGPT failure must fall back to the original local transcription rather than losing user text.
+- Saved post-processing prompts may have dynamic hotkeys with ids `post_process_prompt:<prompt_id>`. A prompt hotkey selects only the prompt for that recording; it must never switch the transcription model. Transcription always uses the model currently selected in Handy (including selections made from the tray/model menu).
 - Main backend: `src-tauri/src/codex_client.rs`. Frontend: `src/components/settings/PostProcessingSettingsApi/ChatGptAccountSettings.tsx`.
