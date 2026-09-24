@@ -10,13 +10,16 @@ use std::num::NonZeroU32;
 use std::path::Path;
 
 const CONTEXT_TOKENS: u32 = 4096;
-const MAX_NEW_TOKENS: usize = 1024;
+const PROMPT_BATCH_TOKENS: usize = 256;
+const MAX_NEW_TOKENS: usize = 384;
 
 #[derive(Deserialize)]
 struct Request {
     model_path: String,
     system_prompt: String,
     user_content: String,
+    #[serde(default)]
+    force_cpu: bool,
 }
 
 #[derive(Serialize)]
@@ -67,10 +70,16 @@ fn run() -> Result<String, String> {
         Path::new(&request.model_path),
         &request.system_prompt,
         &request.user_content,
+        request.force_cpu,
     )
 }
 
-fn infer(model_path: &Path, system_prompt: &str, user_content: &str) -> Result<String, String> {
+fn infer(
+    model_path: &Path,
+    system_prompt: &str,
+    user_content: &str,
+    force_cpu: bool,
+) -> Result<String, String> {
     if !model_path.is_file() {
         return Err("GGUF model path does not exist".to_string());
     }
@@ -80,7 +89,7 @@ fn infer(model_path: &Path, system_prompt: &str, user_content: &str) -> Result<S
     backend.void_logs();
 
     let model_params = LlamaModelParams::default()
-        .with_n_gpu_layers(999)
+        .with_n_gpu_layers(if force_cpu { 0 } else { 999 })
         .with_use_mmap(true)
         .with_use_mlock(false);
 
@@ -106,7 +115,7 @@ fn infer(model_path: &Path, system_prompt: &str, user_content: &str) -> Result<S
         .unwrap_or(4);
     let ctx_params = LlamaContextParams::default()
         .with_n_ctx(NonZeroU32::new(context_size))
-        .with_n_batch(context_size)
+        .with_n_batch(PROMPT_BATCH_TOKENS as u32)
         .with_n_threads(threads)
         .with_n_threads_batch(threads);
 
@@ -129,28 +138,45 @@ fn infer(model_path: &Path, system_prompt: &str, user_content: &str) -> Result<S
             max_context
         ));
     }
-    let max_new_tokens = MAX_NEW_TOKENS.min(max_context - tokens.len() - 1);
+    // Post-processing output should be roughly proportional to the input, not
+    // an unconstrained chat response. The cap also prevents a malformed chat
+    // template/model from keeping the UI in "Processing" for minutes.
+    let max_new_tokens = tokens
+        .len()
+        .clamp(96, MAX_NEW_TOKENS)
+        .min(max_context - tokens.len() - 1);
 
-    let mut batch = LlamaBatch::new(tokens.len().max(1), 1);
-    let last_index = tokens.len() as i32 - 1;
-    for (index, token) in (0_i32..).zip(tokens.into_iter()) {
-        batch
-            .add(token, index, &[0], index == last_index)
-            .map_err(|e| format!("Failed to build local LLM prompt batch: {e}"))?;
+    // Keep n_batch small on 8 GB unified-memory Macs. Decode the prompt in
+    // chunks instead of allocating a 4K-token compute batch for short dictation.
+    let mut batch = LlamaBatch::new(PROMPT_BATCH_TOKENS, 1);
+    let mut position = 0_i32;
+    let total_tokens = tokens.len();
+
+    for (chunk_index, chunk) in tokens.chunks(PROMPT_BATCH_TOKENS).enumerate() {
+        batch.clear();
+        let final_chunk = (chunk_index + 1) * PROMPT_BATCH_TOKENS >= total_tokens;
+        for (offset, token) in chunk.iter().copied().enumerate() {
+            let is_last = final_chunk && offset + 1 == chunk.len();
+            batch
+                .add(token, position, &[0], is_last)
+                .map_err(|e| format!("Failed to build local LLM prompt batch: {e}"))?;
+            position += 1;
+        }
+        ctx.decode(&mut batch)
+            .map_err(|e| format!("Local LLM prompt evaluation failed: {e}"))?;
     }
-    ctx.decode(&mut batch)
-        .map_err(|e| format!("Local LLM prompt evaluation failed: {e}"))?;
 
     let mut sampler = LlamaSampler::greedy();
-    let mut position = batch.n_tokens();
     let mut output = String::new();
     let mut decoder = encoding_rs::UTF_8.new_decoder();
 
+    let mut reached_eog = false;
     for _ in 0..max_new_tokens {
         let token = sampler.sample(&ctx, batch.n_tokens() - 1);
         sampler.accept(token);
 
         if model.is_eog_token(token) {
+            reached_eog = true;
             break;
         }
 
@@ -166,6 +192,12 @@ fn infer(model_path: &Path, system_prompt: &str, user_content: &str) -> Result<S
         position += 1;
         ctx.decode(&mut batch)
             .map_err(|e| format!("Local LLM token evaluation failed: {e}"))?;
+    }
+
+    if !reached_eog {
+        return Err(format!(
+            "Local LLM exceeded the bounded output budget of {max_new_tokens} tokens"
+        ));
     }
 
     let text = output.trim().to_string();
