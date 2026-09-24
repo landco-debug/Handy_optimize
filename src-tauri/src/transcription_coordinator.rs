@@ -538,14 +538,15 @@ pub fn is_transcribe_binding(id: &str) -> bool {
     id == "transcribe"
         || id == "transcribe_with_post_process"
         || crate::settings::is_model_switch_binding(id)
+        || crate::settings::is_post_process_prompt_binding(id)
 }
 
-/// Key into `ACTION_MAP`. Per-model hotkeys (`switch_model:<id>`) are dynamic,
-/// so they have no entry of their own: they run the plain transcribe action,
-/// after `start` has made their model the active one.
+/// Dynamic model hotkeys switch models; dynamic prompt hotkeys deliberately do not.
 fn action_key(binding_id: &str) -> &str {
     if crate::settings::is_model_switch_binding(binding_id) {
         "transcribe"
+    } else if crate::settings::is_post_process_prompt_binding(binding_id) {
+        "transcribe_with_post_process"
     } else {
         binding_id
     }
