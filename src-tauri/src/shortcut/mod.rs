@@ -59,12 +59,14 @@ pub(crate) fn handy_keys_cancel_bindings(
     seen.insert(base_hotkey);
 
     for (binding_id, binding) in &settings.bindings {
+        let is_post_process = binding_id == "transcribe_with_post_process"
+            || settings::is_post_process_prompt_binding(binding_id);
         let is_transcribe = binding_id == "transcribe"
-            || binding_id == "transcribe_with_post_process"
+            || is_post_process
             || settings::is_model_switch_binding(binding_id);
         if !is_transcribe
             || binding.current_binding.trim().is_empty()
-            || (binding_id == "transcribe_with_post_process" && !settings.post_process_enabled)
+            || (is_post_process && !settings.post_process_enabled)
         {
             continue;
         }
@@ -194,10 +196,12 @@ pub fn change_binding(
     id: String,
     binding: String,
 ) -> Result<BindingResponse, String> {
-    // Per-model hotkeys are dynamic bindings with their own lifecycle
-    // (created on first assignment, removed when cleared).
+    // Per-model and per-prompt hotkeys are dynamic bindings with their own lifecycle.
     if settings::is_model_switch_binding(&id) {
         return change_model_binding(app, id, binding);
+    }
+    if settings::is_post_process_prompt_binding(&id) {
+        return change_post_process_prompt_binding(app, id, binding);
     }
 
     let mut settings = settings::get_settings(&app);
@@ -438,6 +442,63 @@ fn change_model_binding(
         binding: Some(updated),
         error: None,
     })
+}
+
+/// Assign, change or clear a hotkey for one saved post-processing prompt.
+/// This deliberately never changes the selected transcription model.
+fn change_post_process_prompt_binding(
+    app: AppHandle,
+    id: String,
+    binding: String,
+) -> Result<BindingResponse, String> {
+    let mut settings = settings::get_settings(&app);
+    let prompt_id = settings::post_process_prompt_id_from_binding(&id)
+        .ok_or_else(|| "Invalid post-processing prompt binding id".to_string())?;
+    let prompt_name = settings
+        .post_process_prompts
+        .iter()
+        .find(|prompt| prompt.id == prompt_id)
+        .map(|prompt| prompt.name.clone())
+        .ok_or_else(|| format!("Prompt with id '{}' not found", prompt_id))?;
+    let existing = settings.bindings.get(&id).cloned();
+
+    if binding.trim().is_empty() {
+        if let Some(old) = existing {
+            let _ = unregister_shortcut(&app, old);
+            settings.bindings.remove(&id);
+            settings::write_settings(&app, settings);
+            crate::secure_input::reconcile_fallback(&app);
+        }
+        return Ok(BindingResponse { success: true, binding: None, error: None });
+    }
+
+    validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)?;
+
+    if let Some(old) = &existing {
+        let _ = unregister_shortcut(&app, old.clone());
+    }
+
+    let mut updated = existing.clone().unwrap_or_else(|| ShortcutBinding {
+        id: id.clone(),
+        name: format!("Post-process with {}", prompt_name),
+        description: "Starts dictation and applies this saved post-processing prompt.".to_string(),
+        default_binding: String::new(),
+        current_binding: String::new(),
+    });
+    updated.name = format!("Post-process with {}", prompt_name);
+    updated.current_binding = binding;
+
+    if settings.post_process_enabled {
+        if let Err(e) = register_shortcut(&app, updated.clone()) {
+            if let Some(old) = &existing { restore_registration(&app, old); }
+            return Ok(BindingResponse { success: false, binding: None, error: Some(format!("Failed to register shortcut: {}", e)) });
+        }
+    }
+
+    settings.bindings.insert(id, updated.clone());
+    settings::write_settings(&app, settings);
+    crate::secure_input::reconcile_fallback(&app);
+    Ok(BindingResponse { success: true, binding: Some(updated), error: None })
 }
 
 /// Drop the hotkey of a model that was deleted, so an invisible binding can't
@@ -742,12 +803,15 @@ fn register_all_shortcuts_for_implementation(
         }
     }
 
-    // Per-model hotkeys have no default to fall back to: one that is invalid
-    // for the new implementation is dropped.
+    // Dynamic model/prompt hotkeys have no default to fall back to.
     let model_bindings: Vec<(String, ShortcutBinding)> = current_settings
         .bindings
         .iter()
-        .filter(|(id, _)| settings::is_model_switch_binding(id))
+        .filter(|(id, _)| {
+            settings::is_model_switch_binding(id)
+                || (settings::is_post_process_prompt_binding(id)
+                    && current_settings.post_process_enabled)
+        })
         .map(|(id, binding)| (id.clone(), binding.clone()))
         .collect();
     for (id, binding) in model_bindings {
@@ -1309,17 +1373,20 @@ pub fn change_post_process_enabled_setting(app: AppHandle, enabled: bool) -> Res
     settings.post_process_enabled = enabled;
     settings::write_settings(&app, settings.clone());
 
-    // Register or unregister the post-processing shortcut
-    if let Some(binding) = settings
+    // Register or unregister the global post-processing shortcut and all
+    // per-prompt shortcuts without deleting their assignments.
+    let post_process_bindings: Vec<ShortcutBinding> = settings
         .bindings
-        .get("transcribe_with_post_process")
-        .cloned()
-    {
-        if enabled {
-            let _ = register_shortcut(&app, binding);
-        } else {
-            let _ = unregister_shortcut(&app, binding);
-        }
+        .iter()
+        .filter(|(id, _)| {
+            id.as_str() == "transcribe_with_post_process"
+                || settings::is_post_process_prompt_binding(id)
+        })
+        .map(|(_, binding)| binding.clone())
+        .collect();
+    for binding in post_process_bindings {
+        if enabled { let _ = register_shortcut(&app, binding); }
+        else { let _ = unregister_shortcut(&app, binding); }
     }
 
     crate::secure_input::reconcile_fallback(&app);
@@ -1456,8 +1523,12 @@ pub fn update_post_process_prompt(
         .iter_mut()
         .find(|p| p.id == id)
     {
-        existing_prompt.name = name;
+        existing_prompt.name = name.clone();
         existing_prompt.prompt = prompt;
+        let binding_id = format!("{}{}", settings::POST_PROCESS_PROMPT_BINDING_PREFIX, id);
+        if let Some(binding) = settings.bindings.get_mut(&binding_id) {
+            binding.name = format!("Post-process with {}", name);
+        }
         settings::write_settings(&app, settings);
         Ok(())
     } else {
@@ -1483,13 +1554,19 @@ pub fn delete_post_process_prompt(app: AppHandle, id: String) -> Result<(), Stri
         return Err(format!("Prompt with id '{}' not found", id));
     }
 
-    // If the deleted prompt was selected, select the first one or None
+    // If the deleted prompt was selected, select the first one or None.
     if settings.post_process_selected_prompt_id.as_ref() == Some(&id) {
         settings.post_process_selected_prompt_id =
             settings.post_process_prompts.first().map(|p| p.id.clone());
     }
 
+    let binding_id = format!("{}{}", settings::POST_PROCESS_PROMPT_BINDING_PREFIX, id);
+    if let Some(binding) = settings.bindings.remove(&binding_id) {
+        let _ = unregister_shortcut(&app, binding);
+    }
+
     settings::write_settings(&app, settings);
+    crate::secure_input::reconcile_fallback(&app);
     Ok(())
 }
 
