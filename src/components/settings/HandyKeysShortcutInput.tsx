@@ -8,6 +8,10 @@ import { useSettings } from "../../hooks/useSettings";
 import { useOsType } from "../../hooks/useOsType";
 import { commands } from "@/bindings";
 import { emptyModelHotkey, isModelHotkeyId } from "@/lib/modelHotkeys";
+import {
+  emptyPostProcessPromptHotkey,
+  isPostProcessPromptHotkeyId,
+} from "@/lib/postProcessHotkeys";
 import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { SECURE_INPUT_HELP_URL } from "../SecureInputWarning";
@@ -291,12 +295,17 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
     );
   }
 
-  // Per-model hotkeys are created on first assignment, so a model without
-  // one has no stored binding yet: show an empty, assignable row instead.
+  // Dynamic model/prompt hotkeys are created on first assignment.
   const isModelHotkey = isModelHotkeyId(shortcutId);
+  const isPromptHotkey = isPostProcessPromptHotkeyId(shortcutId);
+  const isDynamicHotkey = isModelHotkey || isPromptHotkey;
   const binding =
     bindings[shortcutId] ??
-    (isModelHotkey ? emptyModelHotkey(shortcutId, label ?? shortcutId) : undefined);
+    (isModelHotkey
+      ? emptyModelHotkey(shortcutId, label ?? shortcutId)
+      : isPromptHotkey
+        ? emptyPostProcessPromptHotkey(shortcutId, label ?? shortcutId)
+        : undefined);
   if (!binding) {
     return (
       <SettingContainer
@@ -324,10 +333,15 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
         "settings.general.modelHotkeys.rowDescription",
         "Press this key to start dictating with this model.",
       )
-    : t(
-        `settings.general.shortcut.bindings.${shortcutId}.description`,
-        binding.description,
-      );
+    : isPromptHotkey
+      ? t(
+          "settings.postProcessing.prompts.hotkeyDescription",
+          "Press this key to dictate with the currently selected transcription model and apply this prompt.",
+        )
+      : t(
+          `settings.general.shortcut.bindings.${shortcutId}.description`,
+          binding.description,
+        );
 
   return (
     <SettingContainer
@@ -356,11 +370,11 @@ export const HandyKeysShortcutInput: React.FC<HandyKeysShortcutInputProps> = ({
               : t("settings.general.modelHotkeys.notSet", "Not set")}
           </div>
         )}
-        {(!isModelHotkey || binding.current_binding) && (
+        {(!isDynamicHotkey || binding.current_binding) && (
           <ResetButton
             onClick={() =>
-              // Model hotkeys have no default: "reset" clears the key.
-              isModelHotkey
+              // Dynamic hotkeys have no default: "reset" clears the key.
+              isDynamicHotkey
                 ? updateBinding(shortcutId, "").catch(console.error)
                 : resetBinding(shortcutId)
             }
