@@ -35,22 +35,29 @@ export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
     };
 
     const computedClassName = `text-sm ${className}`;
+    const commonProps = {
+      className: computedClassName,
+      value: value || null,
+      options,
+      onChange: (selected: string | null) => onSelect(selected ?? ""),
+      onBlur,
+      placeholder,
+      disabled,
+      isLoading,
+    };
 
-    return (
-      <Select
-        className={computedClassName}
-        value={value || null}
-        options={options}
-        onChange={(selected) => onSelect(selected ?? "")}
-        onCreateOption={handleCreate}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        disabled={disabled}
-        isLoading={isLoading}
-        isCreatable={isCreatable}
-        formatCreateLabel={(input) => `Use "${input}"`}
-      />
-    );
+    if (isCreatable) {
+      return (
+        <Select
+          {...commonProps}
+          isCreatable
+          onCreateOption={handleCreate}
+          formatCreateLabel={(input) => `Use "${input}"`}
+        />
+      );
+    }
+
+    return <Select {...commonProps} isCreatable={false} />;
   },
 );
 
