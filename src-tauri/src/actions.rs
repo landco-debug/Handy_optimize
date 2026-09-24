@@ -194,12 +194,24 @@ async fn post_process_transcription(
     if provider.id == LOCAL_GGUF_PROVIDER_ID {
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            let system_prompt = build_system_prompt(&prompt);
+            // Small local instruction models follow the user's transformation
+            // much more reliably when the prompt template is rendered exactly
+            // as authored. Do not strip ${output} and leave an empty
+            // <transcript> block in the system message.
+            let rendered_prompt = if prompt.contains("${output}") {
+                prompt.replace("${output}", transcription)
+            } else {
+                format!(
+                    "{prompt}\n\n<transcript>\n{transcription}\n</transcript>"
+                )
+            };
+            let system_prompt = "You are a text post-processing engine. Follow the transformation instructions in the user message exactly. Return only the transformed text, with no explanation or commentary.".to_string();
+
             return match crate::local_llm::process(
                 app,
                 &model,
                 system_prompt,
-                transcription.to_string(),
+                rendered_prompt,
             )
             .await
             {
@@ -216,6 +228,7 @@ async fn post_process_transcription(
                         "Direct local GGUF post-processing failed: {}. Falling back to original transcription.",
                         error
                     );
+                    let _ = app.emit("post-processing-error", error.clone());
                     None
                 }
             };
@@ -224,6 +237,10 @@ async fn post_process_transcription(
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         {
             debug!("Direct local GGUF provider selected on unsupported platform");
+            let _ = app.emit(
+                "post-processing-error",
+                "Direct local GGUF post-processing is not supported on this platform".to_string(),
+            );
             return None;
         }
     }
