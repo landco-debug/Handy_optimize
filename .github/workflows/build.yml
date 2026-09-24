@@ -516,6 +516,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HANDY_BUILD_TARGET: ${{ inputs.target }}
           APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
           APPLE_ID_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_ID_PASSWORD || '' }}
           APPLE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_PASSWORD || '' }}
@@ -544,6 +545,17 @@ jobs:
           releaseId: ${{ inputs.release-id }}
           assetNamePattern: ${{ steps.patch-release-name.outputs.platform }}
           args: ${{ inputs.build-args }}
+
+      - name: Verify bundled local LLM helper (Apple Silicon macOS)
+        if: inputs.target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target -name '*.app' -type d -print -quit)"
+          HELPER="$APP/Contents/MacOS/handy-local-llm"
+          test -x "$HELPER"
+          file "$HELPER" | grep -q 'arm64'
+          codesign --verify --deep --strict "$APP"
 
       # tauri-action uploads release assets before returning. All AppImage
       # filtering therefore happens inside linuxdeploy above; this verifies the

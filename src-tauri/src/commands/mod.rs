@@ -158,6 +158,43 @@ pub async fn logout_codex_account(
     crate::codex_client::logout(&app).await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn list_local_llm_models(app: AppHandle) -> Result<Vec<String>, String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        return tokio::task::spawn_blocking(move || crate::local_llm::list_models(&app))
+            .await
+            .map_err(|e| format!("Local LLM model scan failed: {e}"))?;
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let _ = app;
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn import_local_llm_model(
+    app: AppHandle,
+    source_path: String,
+) -> Result<String, String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        return tokio::task::spawn_blocking(move || crate::local_llm::import_model(&app, &source_path))
+            .await
+            .map_err(|e| format!("Local LLM model import failed: {e}"))?;
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    {
+        let _ = (app, source_path);
+        Err("Direct local GGUF post-processing is currently available on Apple Silicon macOS only".to_string())
+    }
+}
+
 /// Check if Apple Intelligence is available on this device.
 /// Called by the frontend when the user selects Apple Intelligence provider.
 #[specta::specta]

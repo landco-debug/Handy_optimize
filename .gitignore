@@ -45,3 +45,6 @@ result
 
 # Python bytecode (scripts/)
 __pycache__/
+
+# Generated direct-local-LLM sidecar binaries
+src-tauri/binaries/handy-local-llm-*

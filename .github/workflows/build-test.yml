@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature-chatgpt-account-postprocessing
+      - feature/direct-local-llm
 
 concurrency:
   group: build-test-${{ github.ref }}
@@ -49,7 +50,19 @@ jobs:
           '
 
       - name: Build Handy for Apple Silicon
+        env:
+          HANDY_BUILD_TARGET: aarch64-apple-darwin
         run: bun tauri build --target aarch64-apple-darwin --bundles app,dmg
+
+      - name: Verify bundled local LLM helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name '*.app' -type d -print -quit)"
+          HELPER="$APP/Contents/MacOS/handy-local-llm"
+          test -x "$HELPER"
+          file "$HELPER" | grep -q 'arm64'
+          codesign --verify --deep --strict "$APP"
 
       - name: Upload macOS ARM64 build
         uses: actions/upload-artifact@v7

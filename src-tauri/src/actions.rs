@@ -9,7 +9,7 @@ use crate::managers::transcription::StreamWorkKind;
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{
     get_settings, AppSettings, OverlayStyle, APPLE_INTELLIGENCE_PROVIDER_ID,
-    CHATGPT_ACCOUNT_PROVIDER_ID,
+    CHATGPT_ACCOUNT_PROVIDER_ID, LOCAL_GGUF_PROVIDER_ID,
 };
 use crate::shortcut;
 use crate::tray::{set_tray_state, TrayIconState};
@@ -190,6 +190,43 @@ async fn post_process_transcription(
         "Starting LLM post-processing with provider '{}' (model: {})",
         provider.id, model
     );
+
+    if provider.id == LOCAL_GGUF_PROVIDER_ID {
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            let system_prompt = build_system_prompt(&prompt);
+            return match crate::local_llm::process(
+                app,
+                &model,
+                system_prompt,
+                transcription.to_string(),
+            )
+            .await
+            {
+                Ok(content) => {
+                    let content = strip_invisible_chars(strip_think_block(&content));
+                    debug!(
+                        "Direct local GGUF post-processing succeeded. Output length: {} chars",
+                        content.len()
+                    );
+                    Some(content)
+                }
+                Err(error) => {
+                    error!(
+                        "Direct local GGUF post-processing failed: {}. Falling back to original transcription.",
+                        error
+                    );
+                    None
+                }
+            };
+        }
+
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        {
+            debug!("Direct local GGUF provider selected on unsupported platform");
+            return None;
+        }
+    }
 
     let api_key = settings
         .post_process_api_keys

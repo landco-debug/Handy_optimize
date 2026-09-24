@@ -11,6 +11,7 @@ use tauri_plugin_store::StoreExt;
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
 pub const CHATGPT_ACCOUNT_PROVIDER_ID: &str = "chatgpt_account";
+pub const LOCAL_GGUF_PROVIDER_ID: &str = "local_gguf";
 
 #[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "lowercase")]
@@ -709,6 +710,20 @@ fn default_post_process_providers() -> Vec<PostProcessProvider> {
             id: CHATGPT_ACCOUNT_PROVIDER_ID.to_string(),
             label: "ChatGPT Account".to_string(),
             base_url: "https://chatgpt.com/backend-api/codex".to_string(),
+            allow_base_url_edit: false,
+            models_endpoint: None,
+            supports_structured_output: false,
+        });
+    }
+
+    // Direct local post-processing. The model runs through Handy's bundled
+    // one-shot helper (llama.cpp + Metal), with no localhost server or API key.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        providers.push(PostProcessProvider {
+            id: LOCAL_GGUF_PROVIDER_ID.to_string(),
+            label: "Local (GGUF)".to_string(),
+            base_url: "local-gguf://direct".to_string(),
             allow_base_url_edit: false,
             models_endpoint: None,
             supports_structured_output: false,

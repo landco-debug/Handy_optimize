@@ -12,6 +12,8 @@ mod commands;
 mod helpers;
 mod input;
 mod llm_client;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod local_llm;
 mod managers;
 mod memory;
 mod overlay;
@@ -824,6 +826,8 @@ pub fn run(cli_args: CliArgs) {
             commands::cancel_codex_device_login,
             commands::logout_codex_account,
             commands::check_apple_intelligence_available,
+            commands::list_local_llm_models,
+            commands::import_local_llm_model,
             commands::initialize_enigo,
             commands::initialize_shortcuts,
             commands::models::get_available_models,
