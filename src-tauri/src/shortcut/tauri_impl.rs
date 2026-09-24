@@ -42,13 +42,13 @@ pub fn init_shortcuts(app: &AppHandle) {
         }
     }
 
-    // Per-model hotkeys only exist in the user's settings (no defaults).
+    // Dynamic model/prompt hotkeys only exist in the user's settings.
     for (id, binding) in &user_settings.bindings {
-        if !settings::is_model_switch_binding(id) {
-            continue;
-        }
+        let is_model = settings::is_model_switch_binding(id);
+        let is_prompt = settings::is_post_process_prompt_binding(id);
+        if !is_model && !(is_prompt && user_settings.post_process_enabled) { continue; }
         if let Err(e) = register_shortcut(app, binding.clone()) {
-            error!("Failed to register model hotkey {} during init: {}", id, e);
+            error!("Failed to register dynamic hotkey {} during init: {}", id, e);
         }
     }
 }
