@@ -82,8 +82,17 @@ jobs:
           helper, model = sys.argv[1:3]
           request = {
               "model_path": model,
-              "system_prompt": "Return only the cleaned user text. Do not explain.",
-              "user_content": "hello world",
+              "system_prompt": (
+                  "You are a text post-processing engine. Follow the transformation "
+                  "instructions in the user message exactly. Return only the transformed "
+                  "text, with no explanation or commentary."
+              ),
+              "user_content": """<transcript>
+Привет, мир.
+</transcript>
+
+Translate the transcript into natural English.
+Return only the translated text.""",
               "force_cpu": False,
           }
           result = subprocess.run(
@@ -102,7 +111,12 @@ jobs:
           payload = json.loads(result.stdout)
           if not payload.get("ok") or not str(payload.get("text", "")).strip():
               raise SystemExit(f"invalid helper response: {payload}")
-          print("Local LLM smoke test:", payload["text"][:200])
+          text = str(payload["text"]).strip()
+          if "привет" in text.lower() or "мир" in text.lower():
+              raise SystemExit(f"local LLM did not transform the transcript: {payload}")
+          if "hello" not in text.lower() and "world" not in text.lower():
+              raise SystemExit(f"unexpected translation smoke-test output: {payload}")
+          print("Local LLM translation smoke test:", text[:200])
           PY
 
       - name: Upload macOS ARM64 build
