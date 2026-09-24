@@ -87,12 +87,13 @@ jobs:
                   "instructions in the user message exactly. Return only the transformed "
                   "text, with no explanation or commentary."
               ),
-              "user_content": """<transcript>
-Привет, мир.
-</transcript>
-
-Translate the transcript into natural English.
-Return only the translated text.""",
+              "user_content": (
+                  "<transcript>\n"
+                  "Привет, мир.\n"
+                  "</transcript>\n\n"
+                  "Translate the transcript into natural English.\n"
+                  "Return only the translated text."
+              ),
               "force_cpu": False,
           }
           result = subprocess.run(
