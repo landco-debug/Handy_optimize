@@ -468,6 +468,8 @@
         "promptInstructions": "Prompt Instructions",
         "promptInstructionsPlaceholder": "Write the instructions to run after transcription. Example: Improve grammar and clarity for the following text: ${output}",
         "promptTip": "Tip: Use <code>${output}</code> to insert the transcribed text in your prompt.",
+        "hotkeyLabel": "Hotkey for this prompt",
+        "hotkeyDescription": "Starts dictation with the currently selected transcription model and applies this prompt.",
         "updatePrompt": "Update Prompt",
         "deletePrompt": "Delete Prompt",
         "createPrompt": "Create Prompt",
