@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 const LOCAL_LLM_DIR: &str = "llm_models";
-const HELPER_TIMEOUT: Duration = Duration::from_secs(120);
+const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 
 static INFERENCE_LOCK: OnceCell<tokio::sync::Mutex<()>> = OnceCell::new();
 
@@ -19,6 +19,7 @@ struct HelperRequest {
     model_path: String,
     system_prompt: String,
     user_content: String,
+    force_cpu: bool,
 }
 
 #[derive(Deserialize)]
@@ -159,10 +160,20 @@ pub async fn process(
     let helper = helper_path()?;
     let started = Instant::now();
 
+    // Qwen3.5 uses Gated DeltaNet. Upstream llama.cpp has documented Metal
+    // instability on older Apple GPU generations (including early Apple
+    // Silicon). Keep this family on CPU for correctness; other GGUF models
+    // continue to use Metal.
+    let model_name_lower = model_name.to_ascii_lowercase();
+    let force_cpu = model_name_lower.contains("qwen3.5")
+        || model_name_lower.contains("qwen35")
+        || model_name_lower.contains("qwen3_5");
+
     let request = HelperRequest {
         model_path: path.to_string_lossy().into_owned(),
         system_prompt,
         user_content,
+        force_cpu,
     };
     let payload =
         serde_json::to_vec(&request).map_err(|e| format!("Failed to encode helper request: {e}"))?;
@@ -194,7 +205,7 @@ pub async fn process(
 
     let output = tokio::time::timeout(HELPER_TIMEOUT, operation)
         .await
-        .map_err(|_| "Local LLM post-processing timed out after 120 seconds".to_string())??;
+        .map_err(|_| "Local LLM post-processing timed out after 45 seconds".to_string())??;
 
     let response: HelperResponse = serde_json::from_slice(&output.stdout).map_err(|e| {
         let stderr = short_stderr(&output.stderr);
