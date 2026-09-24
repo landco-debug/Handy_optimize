@@ -1268,9 +1268,19 @@ pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
 /// bindings only exist in `AppSettings::bindings` once the user has assigned a
 /// key to a model (there is no default), and are removed when it is cleared.
 pub const MODEL_SWITCH_BINDING_PREFIX: &str = "switch_model:";
+pub const POST_PROCESS_PROMPT_BINDING_PREFIX: &str = "post_process_prompt:";
 
 pub fn is_model_switch_binding(id: &str) -> bool {
     id.starts_with(MODEL_SWITCH_BINDING_PREFIX)
+}
+
+pub fn is_post_process_prompt_binding(id: &str) -> bool {
+    id.starts_with(POST_PROCESS_PROMPT_BINDING_PREFIX)
+}
+
+pub fn post_process_prompt_id_from_binding(id: &str) -> Option<&str> {
+    id.strip_prefix(POST_PROCESS_PROMPT_BINDING_PREFIX)
+        .filter(|prompt_id| !prompt_id.is_empty())
 }
 
 pub fn get_stored_binding(settings: &AppSettings, id: &str) -> Result<ShortcutBinding, String> {
