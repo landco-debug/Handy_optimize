@@ -126,6 +126,7 @@ async fn post_process_transcription(
     app: &AppHandle,
     settings: &AppSettings,
     transcription: &str,
+    prompt_id_override: Option<&str>,
 ) -> Option<String> {
     if is_blank_transcription(transcription) {
         debug!("Post-processing skipped because the transcription is empty");
@@ -154,8 +155,11 @@ async fn post_process_transcription(
         return None;
     }
 
-    let selected_prompt_id = match &settings.post_process_selected_prompt_id {
-        Some(id) => id.clone(),
+    let selected_prompt_id = match prompt_id_override
+        .map(str::to_string)
+        .or_else(|| settings.post_process_selected_prompt_id.clone())
+    {
+        Some(id) => id,
         None => {
             debug!("Post-processing skipped because no prompt is selected");
             return None;
@@ -469,6 +473,7 @@ pub(crate) async fn process_transcription_output(
     app: &AppHandle,
     transcription: &str,
     post_process: bool,
+    prompt_id_override: Option<&str>,
 ) -> ProcessedTranscription {
     let settings = get_settings(app);
     let mut final_text = transcription.to_string();
@@ -486,16 +491,16 @@ pub(crate) async fn process_transcription_output(
     }
 
     if post_process {
-        if let Some(processed_text) = post_process_transcription(app, &settings, &final_text).await {
+        if let Some(processed_text) =
+            post_process_transcription(app, &settings, &final_text, prompt_id_override).await
+        {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
-
-            if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
-                if let Some(prompt) = settings
-                    .post_process_prompts
-                    .iter()
-                    .find(|prompt| &prompt.id == prompt_id)
-                {
+            let prompt_id = prompt_id_override
+                .map(str::to_string)
+                .or_else(|| settings.post_process_selected_prompt_id.clone());
+            if let Some(prompt_id) = prompt_id {
+                if let Some(prompt) = settings.post_process_prompts.iter().find(|p| p.id == prompt_id) {
                     post_process_prompt = Some(prompt.prompt.clone());
                 }
             }
@@ -820,8 +825,10 @@ impl ShortcutAction for TranscribeAction {
                                     show_processing_overlay(&ah);
                                 }
                             }
+                            let prompt_id_override =
+                                crate::settings::post_process_prompt_id_from_binding(&binding_id);
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                process_transcription_output(&ah, &transcription, post_process, prompt_id_override),
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await
