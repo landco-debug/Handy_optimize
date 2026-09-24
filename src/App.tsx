@@ -181,6 +181,20 @@ function App() {
     };
   }, [t]);
 
+  // Listen for local/cloud post-processing failures. The original
+  // transcription may still be pasted as a fallback, but it must never look
+  // like the selected LLM silently ignored the prompt.
+  useEffect(() => {
+    const unlisten = listen<string>("post-processing-error", (event) => {
+      toast.error(t("errors.postProcessingFailedTitle"), {
+        description: event.payload,
+      });
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [t]);
+
   // Listen for transcription failures and show a toast.
   // The payload is the backend error message (also logged to handy.log).
   useEffect(() => {
