@@ -22,6 +22,7 @@ import { usePostProcessProviderState } from "../PostProcessingSettingsApi/usePos
 import { ChatGptAccountSettings } from "../PostProcessingSettingsApi/ChatGptAccountSettings";
 import { ShortcutInput } from "../ShortcutInput";
 import { useSettings } from "../../../hooks/useSettings";
+import { POST_PROCESS_PROMPT_HOTKEY_PREFIX } from "@/lib/postProcessHotkeys";
 
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
@@ -325,6 +326,13 @@ const PostProcessingSettingsPromptsComponent: React.FC = () => {
                 />
               </p>
             </div>
+
+            <ShortcutInput
+              shortcutId={`${POST_PROCESS_PROMPT_HOTKEY_PREFIX}${selectedPrompt.id}`}
+              label={t("settings.postProcessing.prompts.hotkeyLabel")}
+              descriptionMode="tooltip"
+              grouped={true}
+            />
 
             <div className="flex gap-2 pt-2">
               <Button
