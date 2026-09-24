@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useSettings } from "../../../hooks/useSettings";
 import { commands, type PostProcessProvider } from "@/bindings";
 import type { ModelOption } from "./types";
@@ -11,6 +12,7 @@ type PostProcessProviderState = {
   isCustomProvider: boolean;
   isAppleProvider: boolean;
   isChatGptAccountProvider: boolean;
+  isLocalProvider: boolean;
   appleIntelligenceUnavailable: boolean;
   baseUrl: string;
   handleBaseUrlChange: (value: string) => void;
@@ -27,10 +29,12 @@ type PostProcessProviderState = {
   handleModelSelect: (value: string) => void;
   handleModelCreate: (value: string) => void;
   handleRefreshModels: () => void;
+  handleImportLocalModel: (sourcePath: string) => Promise<void>;
 };
 
 const APPLE_PROVIDER_ID = "apple_intelligence";
 const CHATGPT_ACCOUNT_PROVIDER_ID = "chatgpt_account";
+const LOCAL_PROVIDER_ID = "local_gguf";
 
 export const usePostProcessProviderState = (): PostProcessProviderState => {
   const {
@@ -61,8 +65,11 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   const isAppleProvider = selectedProvider?.id === APPLE_PROVIDER_ID;
   const isChatGptAccountProvider =
     selectedProvider?.id === CHATGPT_ACCOUNT_PROVIDER_ID;
+  const isLocalProvider = selectedProvider?.id === LOCAL_PROVIDER_ID;
   const [appleIntelligenceUnavailable, setAppleIntelligenceUnavailable] =
     useState(false);
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const [isLocalModelsLoading, setIsLocalModelsLoading] = useState(false);
 
   // Use settings directly as single source of truth
   const baseUrl = selectedProvider?.base_url ?? "";
@@ -75,6 +82,19 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
       label: provider.label,
     }));
   }, [providers]);
+
+  const refreshLocalModels = useCallback(async () => {
+    setIsLocalModelsLoading(true);
+    try {
+      const models = await invoke<string[]>("list_local_llm_models");
+      setLocalModels(models);
+    } catch (error) {
+      console.error("Failed to list local LLM models:", error);
+      setLocalModels([]);
+    } finally {
+      setIsLocalModelsLoading(false);
+    }
+  }, []);
 
   const handleProviderSelect = useCallback(
     async (providerId: string) => {
@@ -95,12 +115,11 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
       await setPostProcessProvider(providerId);
 
-      // Auto-fetch available models for the new provider so the model dropdown
-      // reflects what's actually valid. Without this, a stale model value from
-      // a previous provider/base_url can persist and silently 404 at runtime.
-      // Skip when the provider isn't configured yet (no API key / empty base URL)
-      // to avoid unnecessary backend errors.
-      if (providerId !== APPLE_PROVIDER_ID) {
+      // Local GGUF models come from Handy's managed model directory and never
+      // go through the OpenAI-compatible HTTP discovery path.
+      if (providerId === LOCAL_PROVIDER_ID) {
+        void refreshLocalModels();
+      } else if (providerId !== APPLE_PROVIDER_ID) {
         const provider = providers.find((p) => p.id === providerId);
         const apiKey = settings?.post_process_api_keys?.[providerId] ?? "";
         const hasBaseUrl = (provider?.base_url ?? "").trim() !== "";
@@ -117,6 +136,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
       fetchPostProcessModels,
       providers,
       settings,
+      refreshLocalModels,
     ],
   );
 
@@ -169,6 +189,10 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
 
   const handleRefreshModels = useCallback(() => {
     if (isAppleProvider) return;
+    if (isLocalProvider) {
+      void refreshLocalModels();
+      return;
+    }
 
     void (async () => {
       const models = await fetchPostProcessModels(selectedProviderId);
@@ -181,12 +205,27 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     fetchPostProcessModels,
     isAppleProvider,
     isChatGptAccountProvider,
+    isLocalProvider,
+    refreshLocalModels,
     model,
     selectedProviderId,
     updatePostProcessModel,
   ]);
 
-  const availableModelsRaw = postProcessModelOptions[selectedProviderId] || [];
+  const handleImportLocalModel = useCallback(
+    async (sourcePath: string) => {
+      const imported = await invoke<string>("import_local_llm_model", {
+        sourcePath,
+      });
+      await updatePostProcessModel(LOCAL_PROVIDER_ID, imported);
+      await refreshLocalModels();
+    },
+    [refreshLocalModels, updatePostProcessModel],
+  );
+
+  const availableModelsRaw = isLocalProvider
+    ? localModels
+    : postProcessModelOptions[selectedProviderId] || [];
 
   const modelOptions = useMemo<ModelOption[]>(() => {
     const seen = new Set<string>();
@@ -219,9 +258,9 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
   const isModelUpdating = isUpdating(
     `post_process_model:${selectedProviderId}`,
   );
-  const isFetchingModels = isUpdating(
-    `post_process_models_fetch:${selectedProviderId}`,
-  );
+  const isFetchingModels =
+    isLocalModelsLoading ||
+    isUpdating(`post_process_models_fetch:${selectedProviderId}`);
 
   const isCustomProvider = selectedProvider?.id === "custom";
 
@@ -234,6 +273,7 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     isCustomProvider,
     isAppleProvider,
     isChatGptAccountProvider,
+    isLocalProvider,
     appleIntelligenceUnavailable,
     baseUrl,
     handleBaseUrlChange,
@@ -250,5 +290,6 @@ export const usePostProcessProviderState = (): PostProcessProviderState => {
     handleModelSelect,
     handleModelCreate,
     handleRefreshModels,
+    handleImportLocalModel,
   };
 };

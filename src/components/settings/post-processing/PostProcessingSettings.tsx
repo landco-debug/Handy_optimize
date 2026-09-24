@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { RefreshCcw } from "lucide-react";
+import { RefreshCcw, Upload } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { commands } from "@/bindings";
 
 import { Alert } from "../../ui/Alert";
@@ -27,6 +28,30 @@ import { POST_PROCESS_PROMPT_HOTKEY_PREFIX } from "@/lib/postProcessHotkeys";
 const PostProcessingSettingsApiComponent: React.FC = () => {
   const { t } = useTranslation();
   const state = usePostProcessProviderState();
+  const [isImportingLocalModel, setIsImportingLocalModel] = useState(false);
+
+  const handleImportLocalModel = async () => {
+    const sourcePath = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        {
+          name: t("settings.postProcessing.api.localGguf.filterName"),
+          extensions: ["gguf"],
+        },
+      ],
+    });
+    if (typeof sourcePath !== "string") return;
+
+    setIsImportingLocalModel(true);
+    try {
+      await state.handleImportLocalModel(sourcePath);
+    } catch (error) {
+      console.error("Failed to import local GGUF model:", error);
+    } finally {
+      setIsImportingLocalModel(false);
+    }
+  };
 
   return (
     <>
@@ -54,7 +79,7 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         ) : null
       ) : state.isChatGptAccountProvider ? (
         <ChatGptAccountSettings onAuthenticated={state.handleRefreshModels} />
-      ) : (
+      ) : state.isLocalProvider ? null : (
         <>
           {state.selectedProvider?.id === "custom" && (
             <SettingContainer
@@ -104,9 +129,11 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
         <SettingContainer
           title={t("settings.postProcessing.api.model.title")}
           description={
-            state.isCustomProvider
-              ? t("settings.postProcessing.api.model.descriptionCustom")
-              : t("settings.postProcessing.api.model.descriptionDefault")
+            state.isLocalProvider
+              ? t("settings.postProcessing.api.localGguf.description")
+              : state.isCustomProvider
+                ? t("settings.postProcessing.api.model.descriptionCustom")
+                : t("settings.postProcessing.api.model.descriptionDefault")
           }
           descriptionMode="tooltip"
           layout="stacked"
@@ -129,7 +156,20 @@ const PostProcessingSettingsApiComponent: React.FC = () => {
               onCreate={state.handleModelCreate}
               onBlur={() => {}}
               className="flex-1 min-w-[380px]"
+              isCreatable={!state.isLocalProvider}
             />
+            {state.isLocalProvider && (
+              <Button
+                onClick={handleImportLocalModel}
+                variant="secondary"
+                size="md"
+                disabled={isImportingLocalModel}
+                className="shrink-0 flex items-center gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                {t("settings.postProcessing.api.localGguf.importButton")}
+              </Button>
+            )}
             <ResetButton
               onClick={state.handleRefreshModels}
               disabled={state.isFetchingModels}

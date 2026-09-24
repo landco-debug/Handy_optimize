@@ -230,3 +230,24 @@ See the [Troubleshooting](README.md#troubleshooting) section in README.md.
 - Existing API providers and Apple Intelligence remain independent. Any ChatGPT failure must fall back to the original local transcription rather than losing user text.
 - Saved post-processing prompts may have dynamic hotkeys with ids `post_process_prompt:<prompt_id>`. A prompt hotkey selects only the prompt for that recording; it must never switch the transcription model. Transcription always uses the model currently selected in Handy (including selections made from the tray/model menu).
 - Main backend: `src-tauri/src/codex_client.rs`. Frontend: `src/components/settings/PostProcessingSettingsApi/ChatGptAccountSettings.tsx`.
+
+
+## Fork feature: direct local LLM post-processing
+
+- This feature branch is based on `feature-chatgpt-account-postprocessing` at
+  `1fa2da98b9f514477102519a904f21469ae00c41`. Do not move it back onto the
+  older `main`: ChatGPT Account and per-prompt hotkeys are part of the required base.
+- Provider id: `local_gguf`; currently exposed only on Apple Silicon macOS.
+- Local post-processing must not require Ollama, LM Studio, localhost HTTP, an
+  API key, or any network service.
+- Handy keeps the ASR runtime in the main process. GGUF inference runs in the
+  bundled one-shot `handy-local-llm` sidecar using llama.cpp + Metal.
+- The sidecar is not a daemon/server: it opens no port, receives one JSON request
+  through stdin, returns one JSON response through stdout, and exits.
+- The process boundary is intentional because Handy already embeds the
+  transcribe.cpp ggml stack; it avoids loading a second independently built
+  ggml/Metal ABI into the same Mach-O process.
+- Imported GGUF files live under Handy app data in `llm_models/`.
+- The selected or hotkey-overridden prompt is reused unchanged. Prompt hotkeys
+  still select only a prompt and must never switch the currently selected STT model.
+- ChatGPT Account, API providers and Apple Intelligence must remain independent.

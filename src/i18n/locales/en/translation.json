@@ -419,6 +419,11 @@
         "appleIntelligence": {
           "unavailable": "Apple Intelligence is not available on this device. Requires an Apple Silicon Mac running macOS Tahoe (26.0) or later with Apple Intelligence enabled in System Settings."
         },
+        "localGguf": {
+          "description": "Run a local GGUF model directly inside Handy through llama.cpp and Metal, with no API key or local server.",
+          "importButton": "Import GGUF",
+          "filterName": "GGUF model"
+        },
         "baseUrl": {
           "title": "Base URL",
           "description": "API base URL for the selected provider. Only the custom provider can be edited.",

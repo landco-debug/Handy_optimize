@@ -12,6 +12,7 @@ type ModelSelectProps = {
   onCreate: (value: string) => void;
   onBlur: () => void;
   className?: string;
+  isCreatable?: boolean;
 };
 
 export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
@@ -25,6 +26,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
     onCreate,
     onBlur,
     className = "flex-1 min-w-[360px]",
+    isCreatable = true,
   }) => {
     const handleCreate = (inputValue: string) => {
       const trimmed = inputValue.trim();
@@ -45,7 +47,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = React.memo(
         placeholder={placeholder}
         disabled={disabled}
         isLoading={isLoading}
-        isCreatable
+        isCreatable={isCreatable}
         formatCreateLabel={(input) => `Use "${input}"`}
       />
     );
