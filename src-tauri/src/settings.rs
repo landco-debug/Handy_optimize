@@ -1506,7 +1506,7 @@ mod tests {
     }
 
     #[test]
-    fn generic_and_left_specific_shortcuts_overlap() {
+    fn hotkey_overlap_generic_and_left_specific() {
         assert!(shortcut_bindings_overlap(
             "option+shift+space",
             "option_left+shift_left+space"
@@ -1514,7 +1514,7 @@ mod tests {
     }
 
     #[test]
-    fn left_and_right_specific_shortcuts_do_not_overlap() {
+    fn hotkey_overlap_left_and_right_stay_distinct() {
         assert!(!shortcut_bindings_overlap(
             "option_left+shift_left+space",
             "option_right+shift_right+space"
@@ -1522,7 +1522,7 @@ mod tests {
     }
 
     #[test]
-    fn different_shortcut_keys_do_not_overlap() {
+    fn hotkey_overlap_different_keys_stay_distinct() {
         assert!(!shortcut_bindings_overlap(
             "option+shift+space",
             "option+shift+f18"
@@ -1530,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_prompt_hotkey_clears_global_post_process_hotkey() {
+    fn hotkey_overlap_repair_clears_global_post_process_hotkey() {
         let mut settings = get_default_settings();
         settings.bindings.insert(
             format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),
@@ -1550,7 +1550,7 @@ mod tests {
     }
 
     #[test]
-    fn distinct_prompt_hotkey_preserves_global_post_process_hotkey() {
+    fn hotkey_overlap_repair_preserves_distinct_global_hotkey() {
         let mut settings = get_default_settings();
         settings.bindings.insert(
             format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),

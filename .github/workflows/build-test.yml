@@ -57,6 +57,9 @@ jobs:
       - name: Test deterministic text replacements
         run: cargo test --manifest-path src-tauri/Cargo.toml text_replacements --lib
 
+      - name: Test post-processing hotkey overlap rules
+        run: cargo test --manifest-path src-tauri/Cargo.toml hotkey_overlap --lib
+
       - name: Verify bundled local LLM helper
         shell: bash
         run: |
