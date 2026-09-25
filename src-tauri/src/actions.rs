@@ -224,12 +224,13 @@ async fn post_process_transcription(
                     Some(content)
                 }
                 Err(error) => {
-                    error!(
-                        "Direct local GGUF post-processing failed: {}. Falling back to original transcription.",
-                        error
-                    );
+                    error!("Direct local GGUF post-processing failed: {}", error);
                     let _ = app.emit("post-processing-error", error.clone());
-                    None
+                    // For the explicit Local (GGUF) provider, silently pasting
+                    // the unprocessed transcription is misleading: it looks as
+                    // if the model ignored the selected prompt. Return an empty
+                    // processed result so the caller pastes nothing on failure.
+                    Some(String::new())
                 }
             };
         }
@@ -241,7 +242,7 @@ async fn post_process_transcription(
                 "post-processing-error",
                 "Direct local GGUF post-processing is not supported on this platform".to_string(),
             );
-            return None;
+            return Some(String::new());
         }
     }
 
