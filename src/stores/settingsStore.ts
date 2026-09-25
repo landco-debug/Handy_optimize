@@ -12,6 +12,7 @@ import type {
 import { commands } from "@/bindings";
 import { toast } from "sonner";
 import { isModelHotkeyId } from "@/lib/modelHotkeys";
+import { isPostProcessPromptHotkeyId } from "@/lib/postProcessHotkeys";
 
 interface SettingsStore {
   settings: Settings | null;
@@ -392,10 +393,10 @@ export const useSettingsStore = create<SettingsStore>()(
           throw new Error(result.data.error || "Failed to update binding");
         }
 
-        // Assigning a per-model hotkey also clears the global transcribe
-        // binding in the backend. Refresh so the global field immediately
-        // shows the real "Not set" state instead of its optimistic old value.
-        if (isModelHotkeyId(id)) {
+        // Dynamic model/prompt hotkeys may also clear an overlapping global
+        // binding in the backend. Refresh so both fields immediately reflect
+        // the authoritative state.
+        if (isModelHotkeyId(id) || isPostProcessPromptHotkeyId(id)) {
           await get().refreshSettings();
         }
       } catch (error) {
@@ -418,9 +419,13 @@ export const useSettingsStore = create<SettingsStore>()(
               : null,
           }));
         }
-        // A model hotkey that failed on first assignment never existed in
+        // A dynamic hotkey that failed on first assignment never existed in
         // the backend: drop the optimistic entry instead of restoring a key.
-        if (originalBinding === undefined && isModelHotkeyId(id) && get().settings) {
+        if (
+          originalBinding === undefined &&
+          (isModelHotkeyId(id) || isPostProcessPromptHotkeyId(id)) &&
+          get().settings
+        ) {
           set((state) => {
             if (!state.settings) return {};
             const { [id]: _removed, ...rest } = state.settings.bindings ?? {};

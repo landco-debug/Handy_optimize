@@ -281,6 +281,35 @@ pub fn change_binding(
         });
     }
 
+    // The global selected-prompt hotkey may coexist with prompt-specific
+    // hotkeys only when the physical combinations are distinct. In particular,
+    // a generic option+shift+space overlaps option_left+shift_left+space.
+    if id == "transcribe_with_post_process" {
+        if let Some((prompt_binding_id, _)) = settings.bindings.iter().find(|(binding_id, b)| {
+            settings::is_post_process_prompt_binding(binding_id)
+                && !b.current_binding.trim().is_empty()
+                && settings::shortcut_bindings_overlap(&binding, &b.current_binding)
+        }) {
+            let prompt_name = settings::post_process_prompt_id_from_binding(prompt_binding_id)
+                .and_then(|prompt_id| {
+                    settings
+                        .post_process_prompts
+                        .iter()
+                        .find(|prompt| prompt.id == prompt_id)
+                        .map(|prompt| prompt.name.as_str())
+                })
+                .unwrap_or("saved prompt");
+            return Ok(BindingResponse {
+                success: false,
+                binding: Some(binding_to_modify),
+                error: Some(format!(
+                    "This shortcut overlaps the hotkey for post-processing prompt '{}'. Choose a different global shortcut or clear that prompt hotkey first.",
+                    prompt_name
+                )),
+            });
+        }
+    }
+
     // If this is the cancel binding, just update the settings and return
     // It's managed dynamically, so we don't register/unregister here
     if id == "cancel" {
@@ -474,8 +503,54 @@ fn change_post_process_prompt_binding(
 
     validate_shortcut_for_implementation(&binding, settings.keyboard_implementation)?;
 
+    // Two prompt-specific bindings must never compete for the same physical
+    // keystroke. Side-specific left/right shortcuts remain distinct; only
+    // genuinely overlapping combinations are rejected.
+    if let Some((other_id, _)) = settings.bindings.iter().find(|(other_id, other)| {
+        other_id.as_str() != id
+            && settings::is_post_process_prompt_binding(other_id)
+            && !other.current_binding.trim().is_empty()
+            && settings::shortcut_bindings_overlap(&binding, &other.current_binding)
+    }) {
+        let other_name = settings::post_process_prompt_id_from_binding(other_id)
+            .and_then(|other_prompt_id| {
+                settings
+                    .post_process_prompts
+                    .iter()
+                    .find(|prompt| prompt.id == other_prompt_id)
+                    .map(|prompt| prompt.name.as_str())
+            })
+            .unwrap_or("another saved prompt");
+        return Ok(BindingResponse {
+            success: false,
+            binding: existing,
+            error: Some(format!(
+                "This shortcut is already used by post-processing prompt '{}'.",
+                other_name
+            )),
+        });
+    }
+
+    // If the new prompt-specific key overlaps the global selected-prompt key,
+    // the specific prompt wins. Remove the global registration first so the
+    // new binding can be registered atomically, then persist the global key as
+    // genuinely unassigned.
+    let overlapping_global = settings
+        .bindings
+        .get("transcribe_with_post_process")
+        .cloned()
+        .filter(|global| {
+            !global.current_binding.trim().is_empty()
+                && settings::shortcut_bindings_overlap(&binding, &global.current_binding)
+        });
+
     if let Some(old) = &existing {
         let _ = unregister_shortcut(&app, old.clone());
+    }
+    if settings.post_process_enabled {
+        if let Some(global) = &overlapping_global {
+            let _ = unregister_shortcut(&app, global.clone());
+        }
     }
 
     let mut updated = existing.clone().unwrap_or_else(|| ShortcutBinding {
@@ -490,11 +565,26 @@ fn change_post_process_prompt_binding(
 
     if settings.post_process_enabled {
         if let Err(e) = register_shortcut(&app, updated.clone()) {
-            if let Some(old) = &existing { restore_registration(&app, old); }
-            return Ok(BindingResponse { success: false, binding: None, error: Some(format!("Failed to register shortcut: {}", e)) });
+            if let Some(old) = &existing {
+                restore_registration(&app, old);
+            }
+            if let Some(global) = &overlapping_global {
+                restore_registration(&app, global);
+            }
+            return Ok(BindingResponse {
+                success: false,
+                binding: None,
+                error: Some(format!("Failed to register shortcut: {}", e)),
+            });
         }
     }
 
+    if let Some(mut global) = overlapping_global {
+        global.current_binding.clear();
+        settings
+            .bindings
+            .insert("transcribe_with_post_process".to_string(), global);
+    }
     settings.bindings.insert(id, updated.clone());
     settings::write_settings(&app, settings);
     crate::secure_input::reconcile_fallback(&app);
@@ -563,7 +653,10 @@ pub fn resume_all_shortcuts(app: &AppHandle) {
         if id == "cancel" {
             continue;
         }
-        if id == "transcribe_with_post_process" && !settings.post_process_enabled {
+        if (id == "transcribe_with_post_process"
+            || settings::is_post_process_prompt_binding(id))
+            && !settings.post_process_enabled
+        {
             continue;
         }
         if let Err(e) = register_shortcut(app, binding.clone()) {
@@ -765,10 +858,12 @@ fn register_all_shortcuts_for_implementation(
             .cloned()
             .unwrap_or_else(|| default_binding.clone());
 
-        // Empty global transcribe is an intentional "not assigned" state,
-        // not an invalid shortcut that should be reset when implementations
-        // are switched.
-        if id == "transcribe" && binding.current_binding.trim().is_empty() {
+        // Empty global transcription/post-processing bindings are intentional
+        // "not assigned" states, not invalid shortcuts that should be reset
+        // when keyboard implementations are switched.
+        if (id == "transcribe" || id == "transcribe_with_post_process")
+            && binding.current_binding.trim().is_empty()
+        {
             continue;
         }
 

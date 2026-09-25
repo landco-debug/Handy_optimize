@@ -1066,6 +1066,138 @@ fn clear_global_transcribe_when_model_hotkeys_present(settings: &mut AppSettings
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShortcutModifierSide {
+    Any,
+    Left,
+    Right,
+}
+
+fn parse_shortcut_modifier(token: &str) -> Option<(&'static str, ShortcutModifierSide)> {
+    let (base, side) = if let Some(base) = token.strip_suffix("_left") {
+        (base, ShortcutModifierSide::Left)
+    } else if let Some(base) = token.strip_suffix("_right") {
+        (base, ShortcutModifierSide::Right)
+    } else {
+        (token, ShortcutModifierSide::Any)
+    };
+
+    let family = match base {
+        "ctrl" | "control" => "ctrl",
+        "option" | "alt" => "option",
+        "shift" => "shift",
+        "command" | "cmd" | "meta" | "super" | "win" => "command",
+        "fn" => "fn",
+        _ => return None,
+    };
+
+    Some((family, side))
+}
+
+fn shortcut_shape(
+    raw: &str,
+) -> Option<(Option<String>, Vec<(&'static str, ShortcutModifierSide)>)> {
+    if raw.trim().is_empty() {
+        return None;
+    }
+
+    let mut key: Option<String> = None;
+    let mut modifiers: Vec<(&'static str, ShortcutModifierSide)> = Vec::new();
+
+    for raw_part in raw.split('+') {
+        let token = raw_part.trim().to_ascii_lowercase();
+        if token.is_empty() {
+            return None;
+        }
+
+        if let Some((family, side)) = parse_shortcut_modifier(&token) {
+            if let Some((_, existing_side)) =
+                modifiers.iter_mut().find(|(existing, _)| *existing == family)
+            {
+                if *existing_side != side {
+                    *existing_side = ShortcutModifierSide::Any;
+                }
+            } else {
+                modifiers.push((family, side));
+            }
+            continue;
+        }
+
+        if key.is_some() {
+            return None;
+        }
+        key = Some(match token.as_str() {
+            "escape" => "esc".to_string(),
+            "return" => "enter".to_string(),
+            other => other.to_string(),
+        });
+    }
+
+    modifiers.sort_by_key(|(family, _)| *family);
+    Some((key, modifiers))
+}
+
+/// Whether two shortcut strings can fire from the same physical key press.
+///
+/// HandyKeys supports side-specific modifiers (for example option_left), while
+/// the legacy/global binding may use a side-agnostic modifier (option). A
+/// generic modifier therefore overlaps either side, but left and right do not
+/// overlap each other.
+pub(crate) fn shortcut_bindings_overlap(left: &str, right: &str) -> bool {
+    let Some((left_key, left_modifiers)) = shortcut_shape(left) else {
+        return false;
+    };
+    let Some((right_key, right_modifiers)) = shortcut_shape(right) else {
+        return false;
+    };
+
+    if left_key != right_key || left_modifiers.len() != right_modifiers.len() {
+        return false;
+    }
+
+    left_modifiers
+        .iter()
+        .zip(right_modifiers.iter())
+        .all(|((left_family, left_side), (right_family, right_side))| {
+            left_family == right_family
+                && (*left_side == ShortcutModifierSide::Any
+                    || *right_side == ShortcutModifierSide::Any
+                    || left_side == right_side)
+        })
+}
+
+/// Repair stores from builds that allowed the global "selected prompt" hotkey
+/// to overlap a prompt-specific hotkey. The specific prompt wins because it is
+/// the more explicit binding; distinct global/per-prompt shortcuts still
+/// coexist normally.
+fn clear_overlapping_global_post_process_hotkey(settings: &mut AppSettings) -> bool {
+    let Some(global_shortcut) = settings
+        .bindings
+        .get("transcribe_with_post_process")
+        .map(|binding| binding.current_binding.clone())
+        .filter(|binding| !binding.trim().is_empty())
+    else {
+        return false;
+    };
+
+    let overlaps_prompt = settings.bindings.iter().any(|(id, binding)| {
+        is_post_process_prompt_binding(id)
+            && !binding.current_binding.trim().is_empty()
+            && shortcut_bindings_overlap(&global_shortcut, &binding.current_binding)
+    });
+
+    if !overlaps_prompt {
+        return false;
+    }
+
+    if let Some(global) = settings.bindings.get_mut("transcribe_with_post_process") {
+        global.current_binding.clear();
+        return true;
+    }
+
+    false
+}
+
 pub fn get_settings(app: &AppHandle) -> AppSettings {
     let store = app
         .store(crate::portable::store_path(SETTINGS_STORE_PATH))
@@ -1100,6 +1232,13 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
         // global transcribe hotkey is genuinely unassigned. This also repairs
         // stores produced by earlier fork builds that allowed both at once.
         if clear_global_transcribe_when_model_hotkeys_present(&mut settings) {
+            updated = true;
+        }
+
+        // Prompt-specific hotkeys may coexist with the global selected-prompt
+        // hotkey only when they are physically distinct. This repairs older
+        // stores such as option+shift+space vs option_left+shift_left+space.
+        if clear_overlapping_global_post_process_hotkey(&mut settings) {
             updated = true;
         }
 
@@ -1364,6 +1503,71 @@ mod tests {
         assert!(!clear_global_transcribe_when_model_hotkeys_present(
             &mut settings
         ));
+    }
+
+    #[test]
+    fn generic_and_left_specific_shortcuts_overlap() {
+        assert!(shortcut_bindings_overlap(
+            "option+shift+space",
+            "option_left+shift_left+space"
+        ));
+    }
+
+    #[test]
+    fn left_and_right_specific_shortcuts_do_not_overlap() {
+        assert!(!shortcut_bindings_overlap(
+            "option_left+shift_left+space",
+            "option_right+shift_right+space"
+        ));
+    }
+
+    #[test]
+    fn different_shortcut_keys_do_not_overlap() {
+        assert!(!shortcut_bindings_overlap(
+            "option+shift+space",
+            "option+shift+f18"
+        ));
+    }
+
+    #[test]
+    fn overlapping_prompt_hotkey_clears_global_post_process_hotkey() {
+        let mut settings = get_default_settings();
+        settings.bindings.insert(
+            format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),
+            ShortcutBinding {
+                id: format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),
+                name: "Cleanup".to_string(),
+                description: String::new(),
+                default_binding: String::new(),
+                current_binding: "option_left+shift_left+space".to_string(),
+            },
+        );
+
+        assert!(clear_overlapping_global_post_process_hotkey(&mut settings));
+        assert!(settings.bindings["transcribe_with_post_process"]
+            .current_binding
+            .is_empty());
+    }
+
+    #[test]
+    fn distinct_prompt_hotkey_preserves_global_post_process_hotkey() {
+        let mut settings = get_default_settings();
+        settings.bindings.insert(
+            format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),
+            ShortcutBinding {
+                id: format!("{}cleanup", POST_PROCESS_PROMPT_BINDING_PREFIX),
+                name: "Cleanup".to_string(),
+                description: String::new(),
+                default_binding: String::new(),
+                current_binding: "f18".to_string(),
+            },
+        );
+
+        assert!(!clear_overlapping_global_post_process_hotkey(&mut settings));
+        assert_eq!(
+            settings.bindings["transcribe_with_post_process"].current_binding,
+            settings.bindings["transcribe_with_post_process"].default_binding
+        );
     }
 
     fn default_settings_json() -> serde_json::Value {
