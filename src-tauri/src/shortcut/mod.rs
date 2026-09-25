@@ -1823,7 +1823,7 @@ pub async fn get_available_accelerators() -> crate::managers::transcription::Ava
 #[cfg(test)]
 mod tests {
     use super::*;
-    use handy_keys::Hotkey;
+    use ::handy_keys::Hotkey;
     use tauri_plugin_global_shortcut::Shortcut;
 
     #[test]
