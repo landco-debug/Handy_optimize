@@ -1206,6 +1206,37 @@ pub fn update_custom_words(app: AppHandle, words: Vec<String>) -> Result<(), Str
 
 #[tauri::command]
 #[specta::specta]
+pub fn update_text_replacements(
+    app: AppHandle,
+    replacements: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    let mut cleaned = std::collections::HashMap::new();
+
+    for (from, to) in replacements {
+        let from = from.trim().to_string();
+        let to = to.trim().to_string();
+
+        if from.is_empty() || to.is_empty() {
+            continue;
+        }
+        if from.chars().count() > 100 || to.chars().count() > 100 {
+            return Err("Auto-replacement phrases must be 100 characters or fewer".to_string());
+        }
+        if from.eq_ignore_ascii_case(&to) {
+            continue;
+        }
+
+        cleaned.insert(from, to);
+    }
+
+    let mut settings = settings::get_settings(&app);
+    settings.text_replacements = cleaned;
+    settings::write_settings(&app, settings);
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn change_word_correction_threshold_setting(
     app: AppHandle,
     threshold: f64,

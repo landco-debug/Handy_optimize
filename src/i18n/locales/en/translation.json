@@ -389,6 +389,15 @@
         "remove": "Remove {{word}}",
         "duplicate": "\"{{word}}\" already exists"
       },
+      "textReplacements": {
+        "title": "Auto-replacements",
+        "description": "Replace recurring ASR mistakes with exact terminology before fuzzy correction and AI post-processing. Matching is case-insensitive.",
+        "from": "Recognized as",
+        "to": "Replace with",
+        "add": "Add",
+        "remove": "Remove replacement for {{phrase}}",
+        "duplicate": "A replacement for \"{{phrase}}\" already exists"
+      },
       "voiceActivityDetection": {
         "title": "Voice Activity Detection",
         "description": "Filter silence from recordings. Streaming-capable models use a longer VAD tail; disabling VAD records raw audio."

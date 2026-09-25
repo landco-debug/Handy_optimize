@@ -1,6 +1,6 @@
 use crate::audio_toolkit::{
-    apply_custom_words, detect_output_language, normalize_transcription_output,
-    remove_filler_words, OutputLanguageEvidence,
+    apply_custom_words, apply_text_replacements, detect_output_language,
+    normalize_transcription_output, remove_filler_words, OutputLanguageEvidence,
 };
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::{EngineType, ModelManager};
@@ -1774,14 +1774,19 @@ fn post_process_transcription_text(
     supported_languages: &[String],
 ) -> String {
     fail_open_text_transform(raw, |raw| {
+        // Exact user rules run first. This is intentionally deterministic and
+        // model-agnostic, so GigaAM/Whisper/etc. all feed the same normalized
+        // terminology into fuzzy correction and later LLM post-processing.
+        let replaced = apply_text_replacements(&raw, &settings.text_replacements);
+
         let corrected = if !settings.custom_words.is_empty() && !custom_words_already_prompted {
             apply_custom_words(
-                &raw,
+                &replaced,
                 &settings.custom_words,
                 settings.word_correction_threshold,
             )
         } else {
-            raw
+            replaced
         };
 
         // Last-resort language evidence: confidence-gated detection from the

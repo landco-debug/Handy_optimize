@@ -133,6 +133,69 @@ fn find_best_match<'a>(
     best_match.map(|m| (m, best_score))
 }
 
+/// Applies deterministic user-defined phrase replacements.
+///
+/// Rules are literal (regex metacharacters are escaped), case-insensitive and
+/// use Unicode word boundaries when the rule starts/ends with an alphanumeric
+/// character. Longer source phrases run first so a specific phrase wins over a
+/// shorter overlapping one.
+pub fn apply_text_replacements(
+    text: &str,
+    replacements: &std::collections::HashMap<String, String>,
+) -> String {
+    if replacements.is_empty() {
+        return text.to_string();
+    }
+
+    let mut rules: Vec<(&str, &str)> = replacements
+        .iter()
+        .filter_map(|(from, to)| {
+            let from = from.trim();
+            let to = to.trim();
+            (!from.is_empty() && !to.is_empty()).then_some((from, to))
+        })
+        .collect();
+
+    rules.sort_by(|(a, _), (b, _)| {
+        b.chars()
+            .count()
+            .cmp(&a.chars().count())
+            .then_with(|| a.cmp(b))
+    });
+
+    let mut result = text.to_string();
+    for (from, to) in rules {
+        let escaped = regex::escape(from);
+        let left_boundary = from
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_alphanumeric())
+            .then_some(r"\b")
+            .unwrap_or("");
+        let right_boundary = from
+            .chars()
+            .last()
+            .is_some_and(|ch| ch.is_alphanumeric())
+            .then_some(r"\b")
+            .unwrap_or("");
+        let pattern = format!("{left_boundary}{escaped}{right_boundary}");
+
+        let Ok(regex) = regex::RegexBuilder::new(&pattern)
+            .case_insensitive(true)
+            .unicode(true)
+            .build()
+        else {
+            continue;
+        };
+
+        result = regex
+            .replace_all(&result, regex::NoExpand(to))
+            .into_owned();
+    }
+
+    result
+}
+
 /// Applies custom word corrections to transcribed text using fuzzy matching
 ///
 /// This function corrects words in the input text by finding the best matches
@@ -464,6 +527,40 @@ mod tests {
         let custom_words = vec!["hello".to_string(), "world".to_string()];
         let result = apply_custom_words(text, &custom_words, 0.5);
         assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_text_replacements_fix_asr_phrase_before_fuzzy_matching() {
+        let replacements = std::collections::HashMap::from([(
+            "MacBook ARM1".to_string(),
+            "MacBook Air M1".to_string(),
+        )]);
+        assert_eq!(
+            apply_text_replacements("My MacBook ARM1 is ready.", &replacements),
+            "My MacBook Air M1 is ready."
+        );
+    }
+
+    #[test]
+    fn test_text_replacements_are_case_insensitive_and_unicode_safe() {
+        let replacements = std::collections::HashMap::from([(
+            "макбук арм один".to_string(),
+            "MacBook Air M1".to_string(),
+        )]);
+        assert_eq!(
+            apply_text_replacements("Это МАКБУК АРМ ОДИН.", &replacements),
+            "Это MacBook Air M1."
+        );
+    }
+
+    #[test]
+    fn test_text_replacements_do_not_replace_inside_larger_word() {
+        let replacements =
+            std::collections::HashMap::from([("Air".to_string(), "AIR".to_string())]);
+        assert_eq!(
+            apply_text_replacements("Air and Airport", &replacements),
+            "AIR and Airport"
+        );
     }
 
     #[test]
