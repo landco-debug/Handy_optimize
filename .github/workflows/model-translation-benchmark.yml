@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - audit/local-translation-models-20260925
+    paths-ignore:
+      - "audit-results/**"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -368,3 +370,25 @@ jobs:
             translation-model-audit.md
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Commit audit report to audit branch
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f translation-model-audit.md || ! -f translation-model-audit.json ]]; then
+            echo "Audit report files are missing; nothing to commit."
+            exit 0
+          fi
+          mkdir -p audit-results
+          cp translation-model-audit.md audit-results/translation-model-audit.md
+          cp translation-model-audit.json audit-results/translation-model-audit.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audit-results/translation-model-audit.md audit-results/translation-model-audit.json
+          if git diff --cached --quiet; then
+            echo "Audit report unchanged."
+            exit 0
+          fi
+          git commit -m "test: save local translation model audit [skip ci]"
+          git push
