@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TSE macOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">TSE <span>macOS</span></div>
+    <form id="searchForm" class="search">
+      <input id="query" autocomplete="off" autofocus placeholder="Название фильма, сериала, книги…">
+      <button type="submit">Поиск</button>
+    </form>
+  </header>
+  <main class="layout">
+    <aside class="sidebar">
+      <h2>Источники</h2>
+      <section class="tracker" data-tracker="rutracker">
+        <label class="tracker-main"><input id="use-rutracker" type="checkbox" checked><span class="dot rt"></span><strong>RuTracker</strong></label>
+        <div class="session-row"><span id="status-rutracker" class="status unknown">сессия не проверена</span></div>
+        <div class="tracker-actions"><button type="button" data-login="rutracker">Войти</button><button type="button" class="secondary" data-clear="rutracker">Сбросить</button></div>
+      </section>
+      <section class="tracker" data-tracker="kinozal">
+        <label class="tracker-main"><input id="use-kinozal" type="checkbox" checked><span class="dot kz"></span><strong>Kinozal</strong></label>
+        <div class="session-row"><span id="status-kinozal" class="status unknown">сессия не проверена</span></div>
+        <div class="tracker-actions"><button type="button" data-login="kinozal">Войти</button><button type="button" class="secondary" data-clear="kinozal">Сбросить</button></div>
+      </section>
+      <label class="toggle"><input id="topSeeds" type="checkbox" checked><span>Сначала по сидам</span></label>
+      <p class="hint">Авторизация открывается во встроенном WebKit. Cookies сохраняются в приложении и используются при поиске.</p>
+    </aside>
+    <section class="content">
+      <div class="content-head"><div id="summary">Введите запрос</div><div id="progress" class="progress"></div></div>
+      <div class="table-wrap">
+        <table><thead><tr><th class="source-col">Источник</th><th>Название</th><th class="date-col">Дата</th><th class="size-col">Размер</th><th class="num-col">S</th><th class="num-col">P</th></tr></thead><tbody id="results"></tbody></table>
+      </div>
+      <div id="empty" class="empty">Результаты появятся здесь.</div>
+    </section>
+  </main>
+  <footer>Нативный macOS-клиент на WebKit. Поисковые селекторы основаны на TSE by Lord (MPL-2.0).</footer>
+  <script src="app.js"></script>
+</body>
+</html>
