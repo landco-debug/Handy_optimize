@@ -10,22 +10,15 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Restore source
-        shell: bash
-        run: |
-          cat .github/tse-build-v2/a .github/tse-build-v2/b | base64 --decode > /tmp/tse-source.zip
-          unzip -t /tmp/tse-source.zip
-          mkdir -p "$RUNNER_TEMP/tse-src"
-          ditto -x -k /tmp/tse-source.zip "$RUNNER_TEMP/tse-src"
       - name: Build
         shell: bash
         run: |
-          cd "$RUNNER_TEMP/tse-src/TSE-macOS"
+          cd tse-macos
           chmod +x build.sh
           ./build.sh
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: TSE-macOS-arm64
-          path: ${{ runner.temp }}/tse-src/TSE-macOS/build/TSE-macOS-arm64.zip
+          path: tse-macos/build/TSE-macOS-arm64.zip
           retention-days: 14
