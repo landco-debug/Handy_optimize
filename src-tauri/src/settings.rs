@@ -526,7 +526,7 @@ fn default_model() -> String {
     "".to_string()
 }
 
-const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
+const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
 
 fn default_settings_schema_version() -> u32 {
     CURRENT_SETTINGS_SCHEMA_VERSION
@@ -994,7 +994,7 @@ pub fn get_default_settings() -> AppSettings {
         show_tray_icon: default_show_tray_icon(),
         paste_delay_ms: default_paste_delay_ms(),
         paste_delay_after_ms: default_paste_delay_after_ms(),
-        reliable_paste: false,
+        reliable_paste: cfg!(target_os = "macos"),
         typing_tool: default_typing_tool(),
         external_script_path: None,
         filler_word_removal_enabled: default_filler_word_removal_enabled(),
@@ -1356,6 +1356,16 @@ fn apply_settings_migrations(
         // transcribe.cpp 0.2 replaced integer registry indices with opaque
         // process-local handles. Clear every old index once.
         settings.transcribe_gpu_device = default_transcribe_gpu_device();
+        updated = true;
+    }
+    if stored_schema_version < 3 {
+        // macOS clipboard insertion used fixed timing in older builds.
+        // Enable the receipt-sequenced path once for existing installs so the
+        // target confirms it actually read the transcript before restoration.
+        #[cfg(target_os = "macos")]
+        {
+            settings.reliable_paste = true;
+        }
         settings.settings_schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
         updated = true;
     }
@@ -1952,6 +1962,25 @@ mod tests {
             settings.settings_schema_version,
             CURRENT_SETTINGS_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn reliable_paste_schema_migration_reaches_current_version() {
+        let raw = serde_json::json!({
+            "settings_schema_version": 2,
+            "reliable_paste": false,
+            "onboarding_completed": false,
+            "whats_new_last_seen_version": default_whats_new_last_seen_version(),
+            "overlay_style": "live",
+            "transcribe_accelerator": "auto",
+            "transcribe_gpu_device": null
+        });
+        let mut settings: AppSettings = serde_json::from_value(raw.clone()).unwrap();
+
+        assert!(apply_settings_migrations(&mut settings, &raw));
+        assert_eq!(settings.settings_schema_version, CURRENT_SETTINGS_SCHEMA_VERSION);
+        #[cfg(target_os = "macos")]
+        assert!(settings.reliable_paste);
     }
 
     #[test]

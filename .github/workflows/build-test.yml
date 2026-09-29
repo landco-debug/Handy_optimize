@@ -60,6 +60,11 @@ jobs:
       - name: Test post-processing hotkey overlap rules
         run: cargo test --manifest-path src-tauri/Cargo.toml hotkey_overlap --lib
 
+      - name: Test reliable paste retry and migration
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml retry_ --lib
+          cargo test --manifest-path src-tauri/Cargo.toml reliable_paste_schema_migration --lib
+
       - name: Verify bundled local LLM helper
         shell: bash
         run: |

@@ -62,6 +62,11 @@ pub(crate) const RESTORE_TIMEOUT: Duration = Duration::from_secs(8);
 /// arrive, so restore quickly instead of waiting out the full timeout.
 pub(crate) const FAILED_INJECTION_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// Retry one dropped paste chord only when the target has not requested the
+/// promised clipboard text. A successful macOS paste necessarily produces a
+/// read receipt, so this avoids blind duplicate pastes.
+pub(crate) const RETRY_NO_RECEIPT_AFTER: Duration = Duration::from_millis(400);
+
 /// Shared, cross-thread record of one paste transaction.
 #[derive(Debug)]
 pub(crate) struct TxState {
@@ -136,6 +141,20 @@ pub(crate) enum WaitDecision {
 
 /// Pure decision: given the current transaction state, keep waiting for the
 /// target to read, or finish now. Both platform event loops call this.
+pub(crate) fn should_retry_without_receipt(
+    state: &TxState,
+    now: Instant,
+    retry_already_scheduled: bool,
+) -> bool {
+    !retry_already_scheduled
+        && !state.ownership_lost
+        && !state.cancelled
+        && !state.injection_failed
+        && !state.any_receipt_after_injection()
+        && state.injected_at.is_some()
+        && now.duration_since(state.published_at) >= RETRY_NO_RECEIPT_AFTER
+}
+
 pub(crate) fn evaluate(state: &TxState, now: Instant) -> WaitDecision {
     if state.ownership_lost || state.cancelled {
         return WaitDecision::Finish;
@@ -259,6 +278,23 @@ mod tests {
             evaluate(&s, Instant::now()),
             WaitDecision::KeepWaiting
         ));
+    }
+
+    #[test]
+    fn retry_is_requested_once_when_first_chord_has_no_receipt() {
+        let mut s = state_after_publish(RETRY_NO_RECEIPT_AFTER);
+        s.injected_at = Some(Instant::now() - RETRY_NO_RECEIPT_AFTER);
+        assert!(should_retry_without_receipt(&s, Instant::now(), false));
+        assert!(!should_retry_without_receipt(&s, Instant::now(), true));
+    }
+
+    #[test]
+    fn retry_is_not_requested_after_a_receipt() {
+        let mut s = state_after_publish(RETRY_NO_RECEIPT_AFTER);
+        let injected = Instant::now() - RETRY_NO_RECEIPT_AFTER;
+        s.injected_at = Some(injected);
+        s.receipts.push(injected + Duration::from_millis(10));
+        assert!(!should_retry_without_receipt(&s, Instant::now(), false));
     }
 
     #[test]

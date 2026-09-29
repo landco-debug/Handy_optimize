@@ -24,7 +24,9 @@ use objc2_foundation::{NSArray, NSInteger, NSObject, NSString};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
-use super::{evaluate, send_chord, TxState, WaitDecision};
+use super::{
+    evaluate, send_chord, should_retry_without_receipt, TxState, WaitDecision,
+};
 use crate::clipboard::send_return_key;
 use crate::input::EnigoState;
 use crate::settings::{AutoSubmitKey, ClipboardHandling, PasteMethod};
@@ -107,6 +109,7 @@ struct MacPending {
     preserve_transcript: bool,
     /// The transcript, for the `preserve_transcript` re-write at settle time.
     transcript: String,
+    retry_scheduled: bool,
     settled: bool,
 }
 
@@ -193,7 +196,11 @@ fn flush_pending(app_handle: &AppHandle, enigo: &mut enigo::Enigo) {
     }
 }
 
-fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
+fn spawn_waiter(
+    pending: Arc<Mutex<MacPending>>,
+    app_handle: AppHandle,
+    retry_method: PasteMethod,
+) {
     thread::spawn(move || {
         let outcome = loop {
             thread::sleep(Duration::from_millis(15));
@@ -214,12 +221,75 @@ fn spawn_waiter(pending: Arc<Mutex<MacPending>>, app_handle: AppHandle) {
                             st.ownership_lost,
                             st.injection_failed,
                         );
-                        (evaluate(&st, now), snapshot)
+                        let retry_now =
+                            should_retry_without_receipt(&st, now, p.retry_scheduled);
+                        (evaluate(&st, now), snapshot, retry_now)
                     }
                     Err(_) => return,
                 };
                 result
             };
+            let (decision, state_snapshot, retry_now) = decision;
+
+            if retry_now {
+                let should_schedule = if let Ok(mut p) = pending.lock() {
+                    if p.settled || p.retry_scheduled {
+                        false
+                    } else {
+                        p.retry_scheduled = true;
+                        true
+                    }
+                } else {
+                    false
+                };
+
+                if should_schedule {
+                    let pending_for_retry = pending.clone();
+                    let app_for_retry = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        let should_retry = {
+                            let p = match pending_for_retry.lock() {
+                                Ok(p) => p,
+                                Err(_) => return,
+                            };
+                            if p.settled {
+                                false
+                            } else {
+                                match p.state.lock() {
+                                    Ok(st) => {
+                                        !st.any_receipt_after_injection()
+                                            && !st.ownership_lost
+                                            && !st.injection_failed
+                                    }
+                                    Err(_) => false,
+                                }
+                            }
+                        };
+                        if !should_retry {
+                            return;
+                        }
+
+                        if let Some(enigo_state) = app_for_retry.try_state::<EnigoState>() {
+                            if let Ok(mut enigo) = enigo_state.0.lock() {
+                                match send_chord(&mut enigo, &retry_method) {
+                                    Ok(()) => info!(
+                                        "[reliable-paste] retried paste chord after no read receipt"
+                                    ),
+                                    Err(e) => {
+                                        error!("[reliable-paste] retry paste chord failed: {e}");
+                                        if let Ok(p) = pending_for_retry.lock() {
+                                            if let Ok(mut st) = p.state.lock() {
+                                                st.injection_failed = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
             if let WaitDecision::Finish = decision {
                 break state_snapshot;
             }
@@ -325,12 +395,13 @@ pub(super) fn run(
         auto_submit_key,
         preserve_transcript: clipboard_handling == ClipboardHandling::CopyToClipboard,
         transcript: text.to_string(),
+        retry_scheduled: false,
         settled: false,
     }));
     if let Ok(mut slot) = PENDING.lock() {
         *slot = Some(pending.clone());
     }
-    spawn_waiter(pending, app_handle.clone());
+    spawn_waiter(pending, app_handle.clone(), *paste_method);
 
     Ok(())
 }
