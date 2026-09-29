@@ -204,7 +204,7 @@ fn spawn_waiter(
     thread::spawn(move || {
         let outcome = loop {
             thread::sleep(Duration::from_millis(15));
-            let (decision, state_snapshot) = {
+            let (decision, state_snapshot, retry_now) = {
                 let p = match pending.lock() {
                     Ok(p) => p,
                     Err(_) => return,
@@ -229,7 +229,6 @@ fn spawn_waiter(
                 };
                 result
             };
-            let (decision, state_snapshot, retry_now) = decision;
 
             if retry_now {
                 let should_schedule = if let Ok(mut p) = pending.lock() {
